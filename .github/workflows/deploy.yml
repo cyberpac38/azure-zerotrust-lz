@@ -1,0 +1,84 @@
+name: deploy-landing-zone
+
+on:
+  pull_request:
+    paths: ["infra/**", "policy/**", ".github/workflows/deploy.yml"]
+  push:
+    branches: [main]
+    paths: ["infra/**", "policy/**"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write      # mints the OIDC token; without it azure/login fails
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+  ARM_USE_AZUREAD: "true"
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    environment: plan
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      # Prints the subject this run actually presented. A federation
+      # mismatch becomes one line of output instead of an evening.
+      - name: Show the OIDC subject claim
+        run: |
+          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["value"])')
+          echo "$TOKEN" | cut -d. -f2 | python3 -c '
+          import sys, base64, json
+          p = sys.stdin.read().strip()
+          p += "=" * (-len(p) % 4)
+          d = json.loads(base64.urlsafe_b64decode(p))
+          print("sub:", d["sub"])
+          print("aud:", d["aud"])'
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - run: terraform init
+      - run: terraform fmt -check -recursive
+      - run: terraform validate
+      - run: terraform plan -input=false
+
+  apply:
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: prod        # protection rule here is the approval gate
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - run: terraform init
+
+      # parallelism 1: concurrent federated credential creation against one
+      # identity returns HTTP 409.
+      - run: terraform apply -auto-approve -input=false -parallelism=1
