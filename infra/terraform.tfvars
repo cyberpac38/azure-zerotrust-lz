@@ -1,0 +1,2 @@
+prefix   = "ztlz"
+location = "eastus"
