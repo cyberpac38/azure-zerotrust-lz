@@ -14,7 +14,14 @@ permissions:
 
 env:
   TF_IN_AUTOMATION: "true"
+  # Terraform authenticates to Azure itself, via OIDC. Without these it
+  # falls back to Azure CLI auth and refuses, because the CLI session
+  # belongs to a service principal rather than a user.
+  ARM_USE_OIDC: "true"
   ARM_USE_AZUREAD: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
 jobs:
   plan:
