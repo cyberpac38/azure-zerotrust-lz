@@ -8,15 +8,23 @@ on:
     paths: ["infra/**", "policy/**"]
   workflow_dispatch:
 
+# Two runs racing each other fight over the state lock. cancel-in-progress is
+# deliberately false: cancelling an apply mid-flight can leave a held lock and
+# a partially written state, which is worse than making the second run wait.
+concurrency:
+  group: ztlz-terraform
+  cancel-in-progress: false
+
 permissions:
   id-token: write      # mints the OIDC token; without it azure/login fails
   contents: read
 
 env:
   TF_IN_AUTOMATION: "true"
-  # Terraform authenticates to Azure itself, via OIDC. Without these it
-  # falls back to Azure CLI auth and refuses, because the CLI session
-  # belongs to a service principal rather than a user.
+  TF_INPUT: "false"
+  # Terraform authenticates to Azure itself, via OIDC. Without these it falls
+  # back to Azure CLI auth and refuses, because the CLI session belongs to a
+  # service principal rather than a user.
   ARM_USE_OIDC: "true"
   ARM_USE_AZUREAD: "true"
   ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
@@ -33,8 +41,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Prints the subject this run actually presented. A federation
-      # mismatch becomes one line of output instead of an evening.
+      # Prints the subject this run actually presented. A federation mismatch
+      # becomes one line of output instead of an evening.
       - name: Show the OIDC subject claim
         run: |
           TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
@@ -58,16 +66,42 @@ jobs:
         with:
           terraform_version: 1.17.0
 
-      - run: terraform init
+      # setup-python must come before any pip step. The runner's system Python
+      # is marked externally managed (PEP 668), so pip installing into it fails
+      # outright. setup-python provides a Python that pip may write to.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install checkov
+        run: pip install --disable-pip-version-check checkov
+
+      - run: terraform init -lock-timeout=5m
       - run: terraform fmt -check -recursive
       - run: terraform validate
-      - run: terraform plan -input=false
+
+      - name: Plan
+        run: terraform plan -out=tfplan -lock-timeout=5m
+
+      # Scan the PLAN, not the HCL. The plan carries resolved variable values
+      # and every resource a module generates; the HCL carries neither, so an
+      # HCL scan cannot see what is actually about to be deployed.
+      # jq pretty-prints it because terraform show emits a single line, and
+      # checkov would otherwise report every finding at line 0.
+      - name: Render the plan as readable JSON
+        run: terraform show -json tfplan | jq '.' > tfplan.json
+
+      # Hard fail, no --soft-fail. Added while infra/ declares no resources, so
+      # the baseline is clean: everything from here either passes or earns an
+      # explicit --skip-check with its reason written beside it.
+      - name: Scan the plan
+        run: checkov -f tfplan.json
 
   apply:
     needs: plan
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
-    environment: prod        # protection rule here is the approval gate
+    environment: prod        # the required-reviewer rule here is the approval gate
     defaults:
       run:
         working-directory: infra
@@ -84,8 +118,18 @@ jobs:
         with:
           terraform_version: 1.17.0
 
-      - run: terraform init
+      - run: terraform init -lock-timeout=5m
+
+      # Plan and apply in the same job, applying the saved plan file. The old
+      # version ran a bare apply, which plans again internally, so what got
+      # applied was never the thing anyone reviewed. The plan file is not
+      # uploaded as an artifact on purpose: this repository is public, and so
+      # are its Actions logs and artifacts.
+      - name: Plan
+        run: terraform plan -out=tfplan -lock-timeout=5m
 
       # parallelism 1: concurrent federated credential creation against one
-      # identity returns HTTP 409.
-      - run: terraform apply -auto-approve -input=false -parallelism=1
+      # identity returns HTTP 409. A saved plan applies without prompting, so
+      # no -auto-approve is needed.
+      - name: Apply exactly that plan
+        run: terraform apply -parallelism=1 -lock-timeout=5m tfplan
