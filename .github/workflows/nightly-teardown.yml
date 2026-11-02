@@ -1,0 +1,94 @@
+name: nightly-firewall-teardown
+
+# The safety net: runs whether or not down.sh was remembered. Worst case
+# becomes one overnight run instead of a month nobody noticed.
+#
+# Deliberately az-based rather than terraform-based. A safety net must not
+# depend on the state file it exists to protect you from: this still stops the
+# meter when state is locked mid-apply, drifted, or unreachable, and it also
+# catches a firewall created outside terraform entirely. The cost is state
+# drift, and that drift is self-healing - the next up.sh refreshes, sees the
+# firewall gone, and plans to recreate it.
+#
+# Environment 'teardown' has no required reviewer. 'prod' does, and a job
+# referencing an environment with required reviewers waits for a human and is
+# cancelled after 30 days - a net pointed at prod would never once have fired.
+#
+# KNOWN LIMITATION: GitHub disables scheduled workflows after 60 days with no
+# repository activity, and this repository is public. Any commit resets that
+# clock. The budget's first alert at $12.50 is the backstop.
+
+on:
+  schedule:
+    - cron: "23 4 * * *"      # 04:23 UTC = 00:23 Barbados, daily
+  workflow_dispatch:
+
+# Shares deploy.yml's group on purpose: an apply creating a firewall while this
+# job deletes it is a race. Queueing is correct; cancelling either one is not.
+concurrency:
+  group: ztlz-terraform
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  teardown:
+    runs-on: ubuntu-latest
+    environment: teardown
+    steps:
+      # No actions/checkout: this job reads no repository files, so there is
+      # no reason to hand it the repository.
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Delete firewalls, scoped to this project's resource groups
+        run: |
+          set -euo pipefail
+          COUNT=0
+          for RG in $(az group list \
+                       --query "[?starts_with(name,'rg-ztlz-')].name" -o tsv); do
+            for FW in $(az network firewall list -g "$RG" --query "[].id" -o tsv); do
+              echo "deleting $FW"
+              az network firewall delete --ids "$FW"
+              COUNT=$((COUNT+1))
+            done
+          done
+          echo "firewalls deleted: $COUNT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete unattached public IPs, same scope
+        run: |
+          set -euo pipefail
+          COUNT=0
+          for RG in $(az group list \
+                       --query "[?starts_with(name,'rg-ztlz-')].name" -o tsv); do
+            for IP in $(az network public-ip list -g "$RG" \
+                         --query "[?ipConfiguration==null].id" -o tsv); do
+              echo "deleting unattached $IP"
+              az network public-ip delete --ids "$IP"
+              COUNT=$((COUNT+1))
+            done
+          done
+          echo "unattached public IPs deleted: $COUNT" >> "$GITHUB_STEP_SUMMARY"
+
+      # Detection is deliberately wider than action: the deletes above cannot
+      # reach outside rg-ztlz-*, but this check looks everywhere. A firewall
+      # anywhere in this subscription is billing, and this job should fail
+      # rather than report a stopped meter that is still running.
+      - name: Verify the meter is stopped
+        run: |
+          set -euo pipefail
+          REMAIN=$(az network firewall list --query "length(@)" -o tsv)
+          if [ "$REMAIN" != "0" ]; then
+            az network firewall list \
+              --query "[].{name:name,rg:resourceGroup}" -o table
+            echo "FAILED: $REMAIN firewall(s) still running after teardown" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "verified: no firewalls anywhere in the subscription" \
+            >> "$GITHUB_STEP_SUMMARY"
