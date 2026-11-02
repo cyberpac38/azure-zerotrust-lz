@@ -58,7 +58,7 @@ jobs:
               COUNT=$((COUNT+1))
             done
           done
-          echo "firewalls deleted: $COUNT" >> "$GITHUB_STEP_SUMMARY"
+          echo "firewalls deleted: $COUNT" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Delete unattached public IPs, same scope
         run: |
@@ -73,7 +73,7 @@ jobs:
               COUNT=$((COUNT+1))
             done
           done
-          echo "unattached public IPs deleted: $COUNT" >> "$GITHUB_STEP_SUMMARY"
+          echo "unattached public IPs deleted: $COUNT" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # Detection is deliberately wider than action: the deletes above cannot
       # reach outside rg-ztlz-*, but this check looks everywhere. A firewall
@@ -91,4 +91,4 @@ jobs:
             exit 1
           fi
           echo "verified: no firewalls anywhere in the subscription" \
-            >> "$GITHUB_STEP_SUMMARY"
+            | tee -a "$GITHUB_STEP_SUMMARY"
