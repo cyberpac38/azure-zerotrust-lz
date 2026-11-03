@@ -23,10 +23,16 @@ on:
     - cron: "23 4 * * *"      # 04:23 UTC = 00:23 Barbados, daily
   workflow_dispatch:
 
-# Shares deploy.yml's group on purpose: an apply creating a firewall while this
-# job deletes it is a race. Queueing is correct; cancelling either one is not.
+# Deliberately NOT sharing deploy.yml's group. Sharing it meant an apply left
+# waiting on the prod approval could hold the group, and with the default
+# queue: single a newer queued run cancels and replaces the older pending one -
+# so successive nightly runs would cancel each other and the net would stop
+# firing with nothing to show for it. A clashing apply is recoverable in one
+# up.sh; a safety net that quietly stops is the unnoticed month this design
+# exists to prevent. The teardown is idempotent and its verify step fails loudly
+# if a firewall survives, so it tolerates the race it no longer serialises.
 concurrency:
-  group: ztlz-terraform
+  group: ztlz-teardown
   cancel-in-progress: false
 
 permissions:
