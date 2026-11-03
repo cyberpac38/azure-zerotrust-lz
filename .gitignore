@@ -7,3 +7,4 @@ tfplan.json
 crash.log
 *.auto.tfvars
 .env
+tfplan

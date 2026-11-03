@@ -30,7 +30,9 @@ CanNotDelete lock and role assignment. Terraform does not manage it.
 
 **Why:** Terraform cannot create the backend it is about to store its state in.
 Something has to exist first. Making that step a script rather than a portal
-click means it is reviewable and repeatable.
+click means it is reviewable. It is NOT idempotent: it generates a fresh
+random suffix on every run, so running it twice creates a second storage
+account rather than converging on the first.
 
 **Alternative rejected:** local state committed to the repo, or a second
 Terraform workspace managing the first one's backend. The first leaks state and

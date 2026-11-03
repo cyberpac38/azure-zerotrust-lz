@@ -13,7 +13,7 @@ variable "location" {
 }
 
 variable "tags" {
-  description = "Tags applied to every resource. Enforced by policy in Phase 9."
+  description = "Tags applied to every resource. Enforced by policy in Phase 7."
   type        = map(string)
   default = {
     owner   = "cyberpac38"

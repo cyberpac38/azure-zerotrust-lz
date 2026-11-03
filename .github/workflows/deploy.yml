@@ -2,7 +2,6 @@ name: deploy-landing-zone
 
 on:
   pull_request:
-    paths: ["infra/**", "policy/**", ".github/workflows/deploy.yml"]
   push:
     branches: [main]
     paths: ["infra/**", "policy/**"]
