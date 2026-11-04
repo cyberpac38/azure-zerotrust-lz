@@ -21,3 +21,9 @@ variable "tags" {
     project = "ztlz"
   }
 }
+
+variable "firewall_enabled" {
+  description = "Whether the Azure Firewall and its hourly-billed public IP exist. False is the steady state: deploy.yml applies unattended and the nightly workflow tears the firewall down, so 'absent' must be what the configuration declares. up.sh and down.sh flip this for a work session."
+  type        = bool
+  default     = false
+}
