@@ -176,8 +176,109 @@ cheaper appliance. The firewall is the component the architecture is about;
 removing it to save money would remove the project.
 
 **Cost:** every work session starts with a ten-minute deploy, and a merge
-during a session will tear the firewall down, because converging on "absent"
-is exactly what the pipeline is supposed to do.
+during a session will tear the firewall down. That collision has an entry of
+its own below.
+
+---
+
+## Why does a route table exist when there is no firewall to point it at?
+
+Because the alternative is a landing zone whose resting state is open
+internet egress.
+
+The first design had the route tables and their subnet associations share the
+firewall's `count`, so the whole routing layer appeared and disappeared with
+it. Between sessions the spokes would then have had no `0.0.0.0/0` route of
+their own, Azure's default system route would have taken over, and the steady
+state of a zero-trust estate — the state it is in for all but a few hours a
+week — would have been every workload subnet reaching the internet directly.
+
+What is gated is only the two resources that bill by the hour,
+`azurerm_firewall` and `azurerm_public_ip`. The route table and its subnet
+associations are always present. Only the next hop is conditional:
+
+```hcl
+next_hop_type          = var.firewall_enabled ? "VirtualAppliance" : "None"
+next_hop_in_ip_address = var.firewall_enabled ? azurerm_firewall.main[0].ip_configuration[0].private_ip_address : null
+```
+
+`None` is not the same as no route. Azure drops traffic matching a `None`
+route rather than falling through to the system default. So the resting state
+is "the spokes cannot reach the internet", and bringing the firewall up
+*relaxes* that to "the spokes reach the internet through an inspected path".
+The direction of failure is the entire point: a forgotten flag costs egress,
+not containment.
+
+This is measured in the data plane rather than argued. Step 3.8 creates one
+VM per spoke and reads its effective routes. With the firewall down, both
+spokes report `User / Active / 0.0.0.0/0 / None`, and the system default
+`0.0.0.0/0 -> Internet` is listed as `Invalid` — the user route is overriding
+it, not merely sitting beside it. With the firewall up, both report
+`User / Active / 0.0.0.0/0 / VirtualAppliance` at the firewall's live private
+IP.
+
+**Alternative rejected:** gating the route tables alongside the firewall,
+which reads as the tidier version of the same idea — no firewall, nothing
+pointing at a firewall. It also cannot be written: route tables use
+`for_each = var.spokes`, and a resource cannot take both `for_each` and
+`count`. The design error and the syntax error had the same root.
+
+**Cost:** a `None` route drops silently, and the component that would log a
+blocked egress is the firewall, which in that state is precisely what is
+absent. A session where the flag was never flipped looks like a broken
+network rather than a closed one. The compensating control is that `up.sh`
+refuses to report success unless every `rt-ztlz-*` `default-egress` route
+names the live firewall's private IP, and `down.sh` refuses unless every one
+of them is back to `None`.
+
+---
+
+## What happens if something merges while the firewall is up?
+
+The firewall is destroyed, and that is the pipeline behaving correctly.
+
+A push to `main` touching `infra/**` or `policy/**` runs the apply job. That
+job plans with no `-var`, and `infra/terraform.tfvars` sets only `prefix` and
+`location`, so `firewall_enabled` resolves to its declared default of
+`false`. The plan it builds is therefore "no firewall, no public IP, both
+spoke routes back to `None`" — whatever an `up.sh` session put into state
+twenty minutes earlier. Terraform is converging on what the repository
+declares, which is the property every other entry in this document is asking
+for.
+
+Neither session script can prevent it. `up.sh` and `down.sh` allowlist what
+*they* apply from Cloud Shell; the pipeline is a separate apply path, with its
+own federated credential and no allowlist. A guard inside the scripts cannot
+reach it, and should not try to — a script that could veto the pipeline would
+be a bypass of the gate below.
+
+The control is the `prod` environment's required reviewer, the same gate that
+protects every other apply and which no longer has `can_admins_bypass`. The
+apply waits. Nothing is destroyed until a human approves it.
+
+Which relocates the risk rather than removing it: **the failure mode is
+approving reflexively.** A merge approval during a live session is not the
+routine one, and nothing on the approval screen says so.
+
+**Consequence worth knowing:** there is no plan to read at the moment the
+approval is requested. Environment protection holds the whole job, so the
+apply job's own `Plan` step has not run yet, and an in-progress run returns
+nothing from its logs. The signal that does exist sits on the pull request:
+its `plan` job runs on every pull request, with no paths filter, planning
+from the same commit with the same default — so a session-colliding merge
+shows the firewall and public IP as destroys on the pull request itself,
+before the merge button is pressed. That is the plan to read, and it is
+readable in advance rather than after approving.
+
+**Consequence worth knowing:** a pull request touching only `docs/**` or a
+root-level script does not trigger the apply job at all, confirmed on pull
+request #7, where `apply` reported as skipped. Documentation work during a
+session is safe; the collision requires a change under `infra/` or `policy/`.
+
+**Cost:** either infrastructure changes wait until the session is over, or a
+merge costs a ten-minute rebuild. There is no version of this in which the
+pipeline is both authoritative and willing to leave an undeclared firewall
+running.
 
 ---
 
