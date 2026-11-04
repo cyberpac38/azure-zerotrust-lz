@@ -135,11 +135,21 @@ jobs:
       - name: Render the plan as readable JSON
         run: terraform show -json tfplan | jq '.' > tfplan.json
 
-      # Hard fail, no --soft-fail. Added while infra/ declares no resources, so
-      # the baseline is clean: everything from here either passes or earns an
-      # explicit --skip-check with its reason written beside it.
+      # Hard fail, no --soft-fail. Added while infra/ declared no resources, so
+      # the baseline was clean: everything from here either passes or earns an
+      # explicit skip with its reason written beside the resource it excuses.
+      #
+      # --repo-root-for-plan-enrichment is what makes "beside the resource"
+      # possible. Scanning a plan file alone makes checkov ignore inline
+      # #checkov:skip comments in the .tf files and report findings at line
+      # offsets into tfplan.json, leaving only a repo-global --skip-check as
+      # an escape - which would silence that check for every future resource
+      # too, including ones where it is a real finding. Enrichment maps
+      # results back to source, so skips are honoured per resource and
+      # findings name the .tf file and line. "." is infra/, the terraform
+      # root, because working-directory is infra.
       - name: Scan the plan
-        run: checkov -f tfplan.json
+        run: checkov -f tfplan.json --repo-root-for-plan-enrichment .
 
   apply:
     needs: plan
