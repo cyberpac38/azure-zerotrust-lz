@@ -407,6 +407,104 @@ can never prevent anything.
 
 ---
 
+## Why is "fallback to internet" switched off on every private DNS zone link?
+
+Because the failure it prevents is less dangerous than the failure it creates
+here.
+
+Once a `privatelink.*` zone is linked to a virtual network, that zone answers
+for its whole namespace inside that network. If it holds no record for the name
+being asked about, it returns an authoritative NXDOMAIN rather than falling
+through to public DNS. A zone that is linked but incomplete is therefore an
+outage that presents as an application fault.
+
+Azure ships a managed fix for exactly that. The `resolutionPolicy` property on
+a virtual network link takes `Default` or `NxDomainRedirect`; with
+`NxDomainRedirect` - the portal labels it "Enable fallback to internet" -
+Azure's recursive resolver retries against the public endpoint name each time
+the private zone answers NXDOMAIN. Microsoft recommends it over the older
+workaround of hand-writing an A record holding the resource's public IP, which
+goes stale the moment that IP changes.
+
+**This estate sets `Default` on all 24 links.** The claim the project makes is
+that a `privatelink` name resolves privately or not at all. Fallback breaks
+that claim quietly: a missing or misnamed record stops being a loud DNS error
+and becomes a successful connection to the public endpoint instead. Once
+Phase 4 disables public network access on those services, the same mistake
+surfaces as a 403 arriving from a direction nobody is watching, rather than as
+the DNS fault it is. It would also hollow out the deliberate
+break-a-DNS-record drill, which would then prove that fallback works rather
+than that the private path does.
+
+**The alternative rejected:** `NxDomainRedirect` everywhere. That is the right
+default for a general enterprise estate, where a broken zone must not take an
+application offline. It is a different objective from this one.
+
+**What the choice costs:** a zone mistake here is an immediate and total outage
+of that namespace inside the linked networks, with no cushion underneath it.
+That cost is accepted on purpose, and it is why the zone list is narrow, why
+every name came from Microsoft's published list rather than from inference, and
+why the zones were created while the estate was still empty - measured before
+the apply, this subscription held zero private DNS zones, zero private
+endpoints, zero virtual machines and zero clusters, and all three virtual
+networks used Azure-provided DNS. Nothing was resolving through these names, so
+a mistake at that moment had nowhere to propagate. Every later moment is worse.
+
+Measured after the apply, read back from Azure rather than from the plan: all
+24 links report `resolutionPolicy: Default`, `registrationEnabled: false` and
+`provisioningState: Succeeded`, and each of the 8 zones carries exactly 3 links
+- the hub and both spokes.
+
+---
+
+## Why only these eight private DNS zones?
+
+Because a zone for a service that never receives a private endpoint is not
+harmless. It is the precise failure this phase exists to avoid, manufactured
+for no benefit.
+
+The build's original draft named Key Vault, SQL Database, Cosmos DB, App
+Service, Container Registry, Service Bus and Azure Monitor. Four of those will
+never hold a private endpoint in this estate. Creating and linking their zones
+would make the estate authoritative for four namespaces it holds no records in,
+so a call to one of those services from inside a spoke would NXDOMAIN instead
+of resolving publicly and working.
+
+What exists, and what needs it:
+
+| Zone | Needed by |
+|---|---|
+| `privatelink.vaultcore.azure.net` | Phase 4, Key Vault |
+| `privatelink.azurecr.io` | Phase 5, Container Registry |
+| `eastus.data.privatelink.azurecr.io` | Phase 5, registry data endpoint |
+| `privatelink.monitor.azure.com` | Phases 11-12, Azure Monitor |
+| `privatelink.oms.opinsights.azure.com` | Phases 11-12, Azure Monitor |
+| `privatelink.ods.opinsights.azure.com` | Phases 11-12, Azure Monitor |
+| `privatelink.agentsvc.azure-automation.net` | Phases 11-12, Azure Monitor |
+| `privatelink.blob.core.windows.net` | Phase 11 flow logs, and required by the Azure Monitor set |
+
+Every name is taken from Microsoft's "Azure Private Endpoint private DNS zone
+values" page. None was typed from memory or inferred from the shape of another
+service's name, because a wrong-but-linked zone captures a namespace and
+NXDOMAINs everything beneath it, where a missing zone falls through to public
+DNS and keeps working. A wrong name is worse than no name.
+
+Two details worth keeping in view. The registry data zone is built from
+`var.location` rather than written literally, so changing region cannot leave a
+stale `eastus` zone behind. And the Azure Monitor set includes the blob zone,
+which the flow log storage also needs - one zone resource, two consumers, which
+is part of why links are flattened into individual resources instead of being
+generated inside the zone.
+
+**The alternative rejected:** create all seven services' zones up front so no
+later phase has to touch this module again. That is cheaper in pull requests,
+and it buys the saving by making four namespaces fail silently today.
+
+**What the choice costs:** adding a service in a later phase means one entry in
+the module's `private_dns_zones` map and a reviewed pull request.
+
+---
+
 ## What have you deliberately not done?
 
 - **Narrowed the CI identity.** It holds Contributor and User Access
@@ -499,3 +597,8 @@ has not been decided, not that it has been forgotten.
 - Which policy requirements have usable built-in definitions rather than
   needing custom JSON
 - What this architecture does **not** defend against
+- Whether a spoke's virtual network DNS can be pointed at the firewall's DNS
+  proxy at all, given that the firewall exists for under an hour per session
+  and its private IP is reassigned on every create. The proxy itself is already
+  enabled on `afwp-ztlz`; what an absent DNS server does to resolution while
+  the firewall is down has not been measured (runbook step 4.4)

@@ -13,6 +13,7 @@ table is to replace the estimate with a measurement.
 | Date | Firewall up (UTC) | Down (UTC) | Hours | Measured spend | Notes |
 |---|---|---|---|---|---|
 | 2026-11-04 | 15:10:40 | 16:10:04 | ~0.9 | not yet read | Steps 3.8/3.9 route verification. See timings below. |
+| 2026-11-05 | - | - | 0 | n/a - nothing hourly existed | Steps 4.1-4.3, private DNS. 8 zones and 24 links applied; private DNS zones and virtual network links carry no hourly charge. Firewall stayed down for the whole session. |
 
 The 2026-11-04 spend cell is deliberately unfilled. Cost analysis lags roughly
 a day, so the number is not readable yet. Read it on or after 2026-11-06 and
@@ -84,7 +85,7 @@ outlives the session - resource timestamps via `az`, or the state blob's
 
 ## Running totals
 
-- Sessions logged: 1
+- Sessions logged: 2
 - Measured firewall hours: ~0.9 (bounded - see the note under the table)
 - Measured spend attributable to the firewall: not yet read
 - Counterfactual if left running: hours in month x measured hourly rate
