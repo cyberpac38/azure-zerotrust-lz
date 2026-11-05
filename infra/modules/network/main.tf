@@ -253,6 +253,11 @@ resource "azurerm_subnet_route_table_association" "workload" {
 # Outputs
 ###############################################################################
 
+output "hub_resource_group_name" {
+  description = "Hub resource group name. Phase 3's DNS module takes this as a module reference rather than a literal name, which is what orders the resource group before any zone on a fresh build."
+  value       = azurerm_resource_group.hub.name
+}
+
 output "hub_vnet_id" {
   description = "Hub VNet resource ID. Phase 3 links private DNS zones to it."
   value       = azurerm_virtual_network.hub.id

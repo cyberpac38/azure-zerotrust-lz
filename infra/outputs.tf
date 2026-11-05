@@ -40,3 +40,18 @@ output "firewall_private_ip" {
   description = "Private IP of the firewall, or null when firewall_enabled is false."
   value       = module.network.firewall_private_ip
 }
+
+output "private_dns_zone_ids" {
+  description = "Private DNS zone resource IDs by zone name. Phase 4 passes the Key Vault zone ID into its private endpoint's DNS zone group; without that group the endpoint exists, routing works, and nothing resolves to it."
+  value       = module.dns.zone_ids
+}
+
+output "private_dns_zone_names" {
+  description = "Zone names created, including the region-scoped Container Registry data zone, which is computed from var.location rather than declared."
+  value       = module.dns.zone_names
+}
+
+output "private_dns_link_count" {
+  description = "Number of virtual network links created. Check against the plan: 8 zones times 3 VNets is 24."
+  value       = module.dns.link_count
+}
