@@ -40,6 +40,44 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A file copied out of a Windows mount arrives as 0777, and git records
+      # that as mode 100755. Terraform, YAML, JSON and Markdown files are not
+      # executables, and an executable .tf in a public repository invites a
+      # question with no good answer. It happened once, to both files of the
+      # private DNS module, because they were delivered by download and copied
+      # in with cp.
+      #
+      # This runs before anything expensive and before Azure is touched at
+      # all, so the failure is as cheap as a failure gets. It is a structural
+      # gate: nothing in it depends on anyone remembering to set a mode. It
+      # lives in the plan job because plan is the check the branch ruleset
+      # requires, so a failure here blocks the merge rather than merely
+      # reporting it.
+      - name: No file is executable unless it is a shell script
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # git ls-files -s separates the path with a TAB, not a space, so the
+          # fields are split on tab and the mode is taken from within field 1.
+          # Default awk splitting truncates any path containing a space, which
+          # would still fail the job but name a file that does not exist.
+          echo "Committed executable files:"
+          git ls-files -s \
+            | awk -F'\t' '{ split($1, m, " "); if (m[1] == "100755") print "  " $2 }'
+          BAD=$(git ls-files -s \
+            | awk -F'\t' '{ split($1, m, " "); if (m[1] == "100755" && $2 !~ /\.sh$/) print $2 }')
+          if [ -n "$BAD" ]; then
+            echo
+            echo "::error::Committed executable, but not a shell script:"
+            printf '%s\n' "$BAD" | sed 's/^/  /'
+            echo
+            echo "Fix: chmod 644 the file, git add it, commit."
+            echo "Avoid: use 'install -m 644 src dst' rather than 'cp' when"
+            echo "placing a downloaded file into the repository."
+            exit 1
+          fi
+          echo "OK - nothing executable except shell scripts"
+
       # GitHub's secret scanning only matches known provider token formats.
       # Generic patterns - private keys, high-entropy strings - need Secret
       # Protection on an organization plan, which this repository does not
