@@ -11,9 +11,8 @@ actually made.
 
 A private-endpoint-only Azure landing zone in which the security posture is
 not a document but a set of enforced controls: Azure Policy deployed by
-Terraform, enforced inside the cluster by Gatekeeper, and kept true by two
-remediation paths — Event Grid for seconds, Azure Policy for guaranteed
-eventual convergence.
+Terraform and kept true by two remediation paths — Event Grid for seconds,
+Azure Policy for guaranteed eventual convergence.
 
 The thing it is really demonstrating is the difference between a control that
 is written down and a control that bites. Most of the decisions below are
@@ -24,8 +23,9 @@ instances of that one idea.
 ## Why a whole subscription for this?
 
 Policy at subscription scope applies to everything in the subscription,
-including resources nobody remembered. Phase 5 switches off public data-plane
-access and Phase 7 starts refusing deployments. In a subscription with real
+including resources nobody remembered. The private endpoints phase switches
+off public data-plane access and the policy repository phase starts refusing
+deployments. In a subscription with real
 work in it, the real work breaks.
 
 **Alternative rejected:** resource-group-scoped assignments inside a shared
@@ -426,11 +426,12 @@ the private zone answers NXDOMAIN. Microsoft recommends it over the older
 workaround of hand-writing an A record holding the resource's public IP, which
 goes stale the moment that IP changes.
 
-**This estate sets `Default` on all 24 links.** The claim the project makes is
+**This estate sets `Default` on every link.** The claim the project makes is
 that a `privatelink` name resolves privately or not at all. Fallback breaks
 that claim quietly: a missing or misnamed record stops being a loud DNS error
-and becomes a successful connection to the public endpoint instead. Once
-Phase 4 disables public network access on those services, the same mistake
+and becomes a successful connection to the public endpoint instead. Once the
+private endpoints phase disables public network access on those services, the
+same mistake
 surfaces as a 403 arriving from a direction nobody is watching, rather than as
 the DNS fault it is. It would also hollow out the deliberate
 break-a-DNS-record drill, which would then prove that fallback works rather
@@ -451,37 +452,36 @@ networks used Azure-provided DNS. Nothing was resolving through these names, so
 a mistake at that moment had nowhere to propagate. Every later moment is worse.
 
 Measured after the apply, read back from Azure rather than from the plan: all
-24 links report `resolutionPolicy: Default`, `registrationEnabled: false` and
-`provisioningState: Succeeded`, and each of the 8 zones carries exactly 3 links
-- the hub and both spokes.
+18 links report `resolutionPolicy: Default`, `registrationEnabled: false` and
+`provisioningState: Succeeded`, and each of the 6 zones carries exactly 3 links
+- the hub and both spokes. Re-measured on 2026-11-13, after the two container
+registry zones were removed.
 
 ---
 
-## Why only these eight private DNS zones?
+## Why only these six private DNS zones?
 
 Because a zone for a service that never receives a private endpoint is not
 harmless. It is the precise failure this phase exists to avoid, manufactured
 for no benefit.
 
 The build's original draft named Key Vault, SQL Database, Cosmos DB, App
-Service, Container Registry, Service Bus and Azure Monitor. Four of those will
+Service, Container Registry, Service Bus and Azure Monitor. Five of those will
 never hold a private endpoint in this estate. Creating and linking their zones
-would make the estate authoritative for four namespaces it holds no records in,
-so a call to one of those services from inside a spoke would NXDOMAIN instead
-of resolving publicly and working.
+would make the estate authoritative for namespaces it holds no records in, so
+a call to one of those services from inside a spoke would NXDOMAIN instead of
+resolving publicly and working.
 
 What exists, and what needs it:
 
 | Zone | Needed by |
 |---|---|
-| `privatelink.vaultcore.azure.net` | Phase 4, Key Vault |
-| `privatelink.azurecr.io` | Phase 5, Container Registry |
-| `eastus.data.privatelink.azurecr.io` | Phase 5, registry data endpoint |
-| `privatelink.monitor.azure.com` | Phases 11-12, Azure Monitor |
-| `privatelink.oms.opinsights.azure.com` | Phases 11-12, Azure Monitor |
-| `privatelink.ods.opinsights.azure.com` | Phases 11-12, Azure Monitor |
-| `privatelink.agentsvc.azure-automation.net` | Phases 11-12, Azure Monitor |
-| `privatelink.blob.core.windows.net` | Phase 11 flow logs, and required by the Azure Monitor set |
+| `privatelink.vaultcore.azure.net` | the private endpoints phase, Key Vault |
+| `privatelink.monitor.azure.com` | the observability and dashboard phases, Azure Monitor |
+| `privatelink.oms.opinsights.azure.com` | the observability and dashboard phases, Azure Monitor |
+| `privatelink.ods.opinsights.azure.com` | the observability and dashboard phases, Azure Monitor |
+| `privatelink.agentsvc.azure-automation.net` | the observability and dashboard phases, Azure Monitor |
+| `privatelink.blob.core.windows.net` | the observability phase's flow logs, and required by the Azure Monitor set |
 
 Every name is taken from Microsoft's "Azure Private Endpoint private DNS zone
 values" page. None was typed from memory or inferred from the shape of another
@@ -489,19 +489,51 @@ service's name, because a wrong-but-linked zone captures a namespace and
 NXDOMAINs everything beneath it, where a missing zone falls through to public
 DNS and keeps working. A wrong name is worse than no name.
 
-Two details worth keeping in view. The registry data zone is built from
-`var.location` rather than written literally, so changing region cannot leave a
-stale `eastus` zone behind. And the Azure Monitor set includes the blob zone,
+One detail worth keeping in view: the Azure Monitor set includes the blob zone,
 which the flow log storage also needs - one zone resource, two consumers, which
 is part of why links are flattened into individual resources instead of being
 generated inside the zone.
 
 **The alternative rejected:** create all seven services' zones up front so no
 later phase has to touch this module again. That is cheaper in pull requests,
-and it buys the saving by making four namespaces fail silently today.
+and it buys the saving by making five namespaces fail silently today.
 
 **What the choice costs:** adding a service in a later phase means one entry in
 the module's `private_dns_zones` map and a reviewed pull request.
+
+---
+
+## Why was the Kubernetes platform cut?
+
+Because this project is read before it is ever run, and the parts removed did
+not carry the argument.
+
+On 2026-11-12 the AKS phase and the in-cluster policy phase that depended on
+it were dropped, taking the plan from 85 steps to 76. Both were real work.
+Neither was load-bearing for what the estate claims: nothing reachable from
+the public internet, no stored cloud credentials, controls the platform
+enforces rather than a document describing them, drift repaired without a
+human, and an hourly meter that exists only while someone is working.
+
+Every one of those stands without a cluster. A workload platform would have
+shown the same controls applied to one more resource type, at the highest
+running cost and the steepest learning curve in the build — and a project its
+author cannot take apart in an interview is worth less than a smaller one he
+can.
+
+**The alternative rejected:** build all 85 steps. More surface area and more
+to answer for, where the extra surface repeats an argument already made rather
+than adding one.
+
+**What the choice costs:** the estate runs no workload, so private endpoints
+and policy are demonstrated against platform services rather than against an
+application. The honest answer to "where is the app?" is that this is a
+landing zone, which is the thing an application lands in.
+
+The container registry went with the cluster, since it existed only to serve
+it. Its two private DNS zones were removed on 2026-11-13 for the same reason
+the zone list was narrowed in the first place, and the removal was measured in
+Azure rather than read off the pipeline: six zones, three links each.
 
 ---
 
@@ -591,9 +623,6 @@ has not been decided, not that it has been forgotten.
 
 - Why a user-assigned policy identity rather than system-assigned
 - Why enforcement mode rather than the Audit effect for staged rollout
-- Why Cilium over Azure NPM and Calico
-- Whether AKS private-cluster mode is immutable after creation, which decides
-  whether Deny is the only effect with power over it
 - Which policy requirements have usable built-in definitions rather than
   needing custom JSON
 - What this architecture does **not** defend against

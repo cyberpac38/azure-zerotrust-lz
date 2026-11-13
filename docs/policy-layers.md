@@ -36,19 +36,16 @@ could repair it.
   a spoke workload silently bypasses the 0.0.0.0/0 route through the firewall,
   which defeats the forced-tunnel design. Removing one afterwards breaks
   whatever attached it, so this is a gate rather than a repair.
-- **Public network access on PaaS data planes** - storage, Key Vault, ACR, and
+- **Public network access on PaaS data planes** - storage, Key Vault, and
   anything else exposing `publicNetworkAccess`. Switching it off automatically
   on a live resource cuts off every caller currently using it. Leaving it on is
   a deliberate exception someone should have to argue for.
-- **AKS clusters without private API server mode.** Listed here because the
-  setting appears to be fixed at creation - see the open questions below. If
-  that holds, Deny is the only effect that can do anything about it.
 - **Storage accounts with shared key access enabled.** The state account
   already runs with `allowSharedKeyAccess` false, so this estate has proved it
   does not need keys. An account that wants them is an exception needing
   sign-off.
 
-### The conflict this layer creates with Phase 5, and the resolution
+### The conflict this layer creates with the private endpoints phase
 
 Runbook steps 5.2 and 5.3 deploy Key Vault with `public_access_enabled = true`,
 seed a secret, then flip it off - specifically so the deploy and the lockdown
@@ -68,8 +65,8 @@ Three ways out, in order of preference:
    the duration of the seeding. The expiry is the important half - an exemption
    without one becomes permanent and nobody notices.
 
-Decide before Phase 7 writes the Deny definition, because the choice changes
-the definition's scope.
+Decide before the policy repository phase writes the Deny definition, because
+the choice changes the definition's scope.
 
 ## DeployIfNotExists - missing and safely creatable
 
@@ -82,8 +79,8 @@ application behaviour, and it always runs after the resource already exists.
 - **Private DNS zone group on a private endpoint.** An endpoint without one has
   no A record, so the name does not resolve inside the VNet and the service
   looks down to the application. Creating the zone group is purely additive.
-  This is the automated counterpart to the Phase 4 warning about incomplete
-  zones.
+  This is the automated counterpart to the private DNS phase's warning about
+  incomplete zones.
 - **Azure Firewall diagnostic categories to Log Analytics.** Step 4.5's
   NXDOMAIN alert queries `AZFWDnsQuery`. Without this policy that table is
   empty and the alert silently never fires - a monitoring step in a later phase
@@ -111,7 +108,7 @@ Deny with a stated migration path rather than in a silent rewrite.
 
 ## The fourth layer, named so it is not forgotten: Audit
 
-Things worth reporting and deliberately not enforced. Phase 13's dashboard
+Things worth reporting and deliberately not enforced. The governance dashboard
 reports three numbers rather than one, and this layer is where the third comes
 from: not "how compliant are we" but "what have we chosen to tolerate, and for
 how long". A governance story with no tolerated set is one nobody believes.
@@ -130,10 +127,8 @@ A thing you want visible but not blocked is Audit.
 
 The layer assignments above are design decisions and are argued, not measured.
 These mechanism claims have NOT been verified on this subscription and must be
-before Phase 7 builds on them:
+before the policy repository phase builds on them:
 
-- whether AKS private-cluster mode is fixed at creation on the current API
-  version
 - which requirements above have usable built-in definitions rather than needing
   custom JSON
 - whether `publicNetworkAccess` is exposed as a policy alias for every service
