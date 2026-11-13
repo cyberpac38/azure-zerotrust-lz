@@ -166,9 +166,16 @@ resource "azurerm_subnet" "workload" {
 # route table: a 0.0.0.0/0 UDR on a private endpoint subnet interferes with
 # private endpoint traffic, and private endpoints do not egress to the
 # internet in the first place, so there is nothing to force through the
-# firewall. private_endpoint_network_policies is deliberately left at the
-# provider default and is the private endpoints phase's concern, not this
-# module's.
+# firewall.
+#
+# private_endpoint_network_policies: Azure's default for a subnet is
+# "Disabled", and Disabled means network security group rules are NOT applied
+# to traffic bound for a private endpoint in the subnet - the NSG below would
+# exist and enforce nothing. Measured on this estate before it was changed:
+# Disabled on all five subnets. "NetworkSecurityGroupEnabled" switches NSG
+# evaluation on. That value rather than "Enabled" because "Enabled" also
+# applies route tables to private endpoint traffic, and this subnet
+# deliberately has no route table.
 resource "azurerm_subnet" "privatelink" {
   for_each = var.spokes
 
@@ -176,6 +183,8 @@ resource "azurerm_subnet" "privatelink" {
   resource_group_name  = azurerm_resource_group.spoke[each.key].name
   virtual_network_name = azurerm_virtual_network.spoke[each.key].name
   address_prefixes     = [cidrsubnet(each.value.address_space, 4, 1)]
+
+  private_endpoint_network_policies = "NetworkSecurityGroupEnabled"
 }
 
 ###############################################################################
@@ -263,6 +272,11 @@ output "hub_resource_group_name" {
 output "hub_vnet_id" {
   description = "Hub VNet resource ID. The private DNS phase links zones to it."
   value       = azurerm_virtual_network.hub.id
+}
+
+output "spoke_resource_group_names" {
+  description = "Spoke resource group names by spoke key. The private endpoints phase takes the shared spoke's as a module reference rather than a literal name, which is what orders the resource group before the vault on a fresh build."
+  value       = { for k, v in azurerm_resource_group.spoke : k => v.name }
 }
 
 output "spoke_vnet_ids" {
@@ -360,11 +374,10 @@ resource "azurerm_network_security_group" "privatelink" {
   # private-endpoint subnets forget: a compromised endpoint NIC calling out is
   # exactly the exfiltration path private endpoints are meant to remove.
   #
-  # NOTE for the private endpoints phase: NSG rules only apply to private
-  # endpoint traffic when the subnet has private_endpoint_network_policies
-  # enabled. This module leaves that at the provider default, so that phase
-  # must set it when it places endpoints here - otherwise these rules exist
-  # and enforce nothing.
+  # These rules apply to private endpoint traffic only because
+  # azurerm_subnet.privatelink sets private_endpoint_network_policies to
+  # "NetworkSecurityGroupEnabled". At Azure's default of "Disabled" they would
+  # exist and enforce nothing.
   security_rule {
     name                       = "deny-internet-inbound"
     priority                   = 4000
