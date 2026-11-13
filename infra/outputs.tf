@@ -55,3 +55,28 @@ output "private_dns_link_count" {
   description = "Number of virtual network links created. Check against the plan: 6 zones times 3 VNets is 18."
   value       = module.dns.link_count
 }
+
+output "key_vault_name" {
+  description = "Key Vault name. Read this rather than rebuilding the name: it carries a suffix derived from the subscription ID. The seeding and verification scripts take it from here."
+  value       = module.privatelink.key_vault_name
+}
+
+output "key_vault_uri" {
+  description = "The vault's data-plane address, reachable only from inside the estate."
+  value       = module.privatelink.key_vault_uri
+}
+
+output "key_vault_private_endpoint_ip" {
+  description = "Private IP of the vault's private endpoint. Compare it against what privatelink.vaultcore.azure.net resolves to inside a spoke; agreement between the two is the proof that the endpoint and DNS are wired to each other."
+  value       = module.privatelink.private_endpoint_ip
+}
+
+output "key_vault_seeder_identity_id" {
+  description = "Resource ID of the identity that writes the vault's test secret from inside the network. The ephemeral VM in runbook step 5.2 attaches it."
+  value       = module.privatelink.seeder_identity_id
+}
+
+output "key_vault_seeder_identity_client_id" {
+  description = "Client ID of the seeding identity, which the VM names when it asks the instance metadata service for a token."
+  value       = module.privatelink.seeder_identity_client_id
+}

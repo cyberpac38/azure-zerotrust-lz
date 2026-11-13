@@ -8,6 +8,8 @@
 #             and the firewall itself when var.firewall_enabled is true
 #   dns     - private DNS zones for private endpoints, and the VNet links
 #             that make each zone authoritative inside this estate
+#   privatelink - the Key Vault, its private endpoint, and the identity that
+#             seeds it from inside the network
 ###############################################################################
 
 module "network" {
@@ -40,4 +42,20 @@ module "dns" {
     { hub = module.network.hub_vnet_id },
     module.network.spoke_vnet_ids
   )
+}
+
+module "privatelink" {
+  source = "./modules/privatelink"
+
+  prefix   = var.prefix
+  location = var.location
+  tags     = var.tags
+
+  # The vault is a shared platform service, so it lives in the shared spoke
+  # rather than the workload one. All three of these are module references,
+  # not literal names: they are the dependency edges that create the resource
+  # group, the subnet and the DNS zone before the vault and its endpoint.
+  resource_group_name           = module.network.spoke_resource_group_names["shared"]
+  privatelink_subnet_id         = module.network.spoke_privatelink_subnet_ids["shared"]
+  key_vault_private_dns_zone_id = module.dns.zone_ids["privatelink.vaultcore.azure.net"]
 }
