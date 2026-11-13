@@ -1,17 +1,25 @@
 # Azure zero-trust landing zone
 
 A private-endpoint-only Azure landing zone where security posture is defined
-as Azure Policy deployed by Terraform, enforced in-cluster by Gatekeeper, and
-kept true by two remediation paths — Event Grid for seconds, Azure Policy for
-guaranteed eventual convergence.
+as Azure Policy deployed by Terraform and kept true by two remediation paths —
+Event Grid for seconds, Azure Policy for guaranteed eventual convergence.
 
 Resource prefix: `ztlz`. Naming: `<resource-type>-ztlz-<role>`. Single region.
 
 ## Status
 
-Phases 0–2 are complete: the Terraform state backend, keyless CI, the cost
-guards, and the repository controls that make everything after this enforced
-rather than merely documented. The hub-and-spoke network is next.
+29 of 76 steps. Complete: the Terraform state backend, keyless CI, the cost
+guards, the repository controls that make everything after this enforced
+rather than merely documented, the hub-and-spoke network, and the private DNS
+zones. Private endpoints are next.
+
+Two steps of the private DNS phase are open rather than done — pointing the
+spokes at the firewall's DNS proxy, and the NXDOMAIN alert. Both are recorded
+under **Open questions** in the decisions log, with the reason each is held.
+
+The scope was trimmed on 2026-11-12: the AKS phase and the in-cluster policy
+phase that depended on it were removed, taking the plan from 85 steps to 76.
+The container registry went with them.
 
 Nothing is running right now, by design — see **Cost**.
 
@@ -44,8 +52,8 @@ Measured spend per session: [docs/cost-sessions.md](docs/cost-sessions.md).
 
 ## Measured results
 
-Filled in at phase 13, from drills rather than estimates. An empty row here
-means the drill has not been run, not that the number is unknown.
+Filled in at the drills phase, from drills rather than estimates. An empty row
+here means the drill has not been run, not that the number is unknown.
 
 | Measurement | Result |
 |---|---|
