@@ -15,28 +15,17 @@
 # 2026-11-04, this subscription held zero private DNS zones, zero private
 # endpoints, zero VMs and zero clusters, and all three VNets had an empty
 # dnsServers list - Azure-provided DNS. Nothing is querying these names, so an
-# empty linked zone has provably no blast radius today. Phase 4's private
-# endpoints then write their own A records through each endpoint's DNS zone
+# empty linked zone has provably no blast radius today. The private endpoints
+# phase then writes its own A records through each endpoint's DNS zone
 # group. Building the zones at any later point means linking them while
 # something is already resolving through them.
 #
 # Private DNS zones are global resources: neither resource here takes a
-# location argument. var.location exists only to build the region-scoped
-# Container Registry data-endpoint zone name.
+# location argument, and this module takes no region at all.
 ###############################################################################
 
 locals {
-  # Microsoft's zone list gives the Container Registry data endpoint as
-  # <region>.data.privatelink.azurecr.io. The region is interpolated, so this
-  # name cannot be written into a variable default alongside the fixed ones.
-  acr_data_zone = "${var.location}.data.privatelink.azurecr.io"
-
-  zones = merge(
-    var.private_dns_zones,
-    {
-      (local.acr_data_zone) = { link_to = var.acr_data_zone_link_to }
-    }
-  )
+  zones = var.private_dns_zones
 
   # The product of zones and their link targets. Keyed by zone and VNet key so
   # that adding a spoke adds links without renaming or recreating an existing
@@ -80,12 +69,12 @@ resource "azurerm_private_dns_zone_virtual_network_link" "this" {
 }
 
 output "zone_ids" {
-  description = "Private DNS zone resource IDs by zone name. Phase 4 passes the Key Vault zone ID into its private endpoint's DNS zone group; without that group the endpoint exists, routing works, and nothing resolves to it."
+  description = "Private DNS zone resource IDs by zone name. The private endpoints phase passes the Key Vault zone ID into its private endpoint's DNS zone group; without that group the endpoint exists, routing works, and nothing resolves to it."
   value       = { for k, v in azurerm_private_dns_zone.this : k => v.id }
 }
 
 output "zone_names" {
-  description = "Zone names actually created, including the region-scoped Container Registry data zone that is computed rather than declared."
+  description = "Zone names actually created."
   value       = sort(keys(azurerm_private_dns_zone.this))
 }
 
