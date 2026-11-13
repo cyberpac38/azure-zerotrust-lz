@@ -25,11 +25,12 @@ variable "location" {
 # NO DEFAULT, deliberately. The runbook's version defaults to
 # owner=unassigned,env=lab. A default means that forgetting to pass tags from
 # the root produces a silently mis-tagged estate that still applies cleanly -
-# and Phase 7 enforces owner/env by policy, so the failure would surface later
+# and the policy repository phase enforces owner/env by policy, so the
+# failure would surface later
 # as a compliance finding against resources this module created. With no
 # default, forgetting is a plan-time error naming the missing argument.
 variable "tags" {
-  description = "Tags applied to every taggable resource. Passed from the root; owner and env are enforced by policy in Phase 7."
+  description = "Tags applied to every taggable resource. Passed from the root; owner and env are enforced by policy in the policy repository phase."
   type        = map(string)
 }
 
@@ -104,7 +105,8 @@ variable "spokes" {
   # snet-privatelink as cidrsubnet(spoke, 4, 1), both adding 4 bits. A /24
   # spoke yields /28 subnets, which is the floor worth allowing: Azure
   # reserves five addresses in every subnet, and the privatelink subnet has to
-  # hold one NIC per private endpoint from Phase 4 onward.
+  # hold one NIC per private endpoint from the private endpoints phase
+  # onward.
   validation {
     condition = alltrue([
       for k, v in var.spokes :

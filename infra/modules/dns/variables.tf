@@ -10,11 +10,6 @@ variable "prefix" {
   type        = string
 }
 
-variable "location" {
-  description = "Azure region. Needed because the Container Registry data-endpoint zone name embeds the region: <region>.data.privatelink.azurecr.io."
-  type        = string
-}
-
 variable "tags" {
   description = "Tags applied to every zone and every link."
   type        = map(string)
@@ -42,44 +37,36 @@ variable "private_dns_zones" {
     have fallen through to public DNS and kept working.
 
     Deliberately narrowed to the services this estate will actually hold
-    private endpoints for. SQL, Cosmos DB, App Service and Service Bus are
-    absent on purpose: a zone for a service that never gets an endpoint is
-    exactly the failure above, manufactured for no benefit. Adding a service
-    later is one entry here, reviewed like any other change.
+    private endpoints for. SQL, Cosmos DB, App Service, Service Bus and
+    Container Registry are absent on purpose: a zone for a service that never
+    gets an endpoint is exactly the failure above, manufactured for no
+    benefit. Adding a service later is one entry here, reviewed like any
+    other change.
 
-    The Container Registry data-endpoint zone is added in main.tf instead,
-    because its name is computed from var.location and cannot appear in a
-    variable default.
+    Container Registry left on 2026-11-12 with the AKS phase that was the
+    only thing needing it.
   EOT
   type = map(object({
     link_to = list(string)
   }))
   default = {
-    # Phase 4 - Key Vault
+    # Private endpoints phase - Key Vault
     "privatelink.vaultcore.azure.net" = { link_to = ["hub", "workload", "shared"] }
 
-    # Phase 5 - Container Registry, control plane. The region-scoped data
-    # endpoint zone is added in main.tf.
-    "privatelink.azurecr.io" = { link_to = ["hub", "workload", "shared"] }
-
-    # Phases 11-12 - Azure Monitor private link scope. All four names belong to
-    # one service; a partial set resolves some Monitor calls and not others,
-    # which is harder to diagnose than none of them resolving.
+    # Observability and governance dashboard phases - Azure Monitor private
+    # link scope. All four names belong to one service; a partial set resolves
+    # some Monitor calls and not others, which is harder to diagnose than none
+    # of them resolving.
     "privatelink.monitor.azure.com"             = { link_to = ["hub", "workload", "shared"] }
     "privatelink.oms.opinsights.azure.com"      = { link_to = ["hub", "workload", "shared"] }
     "privatelink.ods.opinsights.azure.com"      = { link_to = ["hub", "workload", "shared"] }
     "privatelink.agentsvc.azure-automation.net" = { link_to = ["hub", "workload", "shared"] }
 
-    # Phase 11 flow log storage, and required by the Azure Monitor set above.
-    # One zone resource, two consumers - which is why links are flattened.
+    # Observability phase - flow log storage, and required by the Azure
+    # Monitor set above. One zone resource, two consumers - which is why
+    # links are flattened.
     "privatelink.blob.core.windows.net" = { link_to = ["hub", "workload", "shared"] }
   }
-}
-
-variable "acr_data_zone_link_to" {
-  description = "VNet keys the region-scoped Container Registry data zone is linked to. Separate from private_dns_zones because its name is computed from var.location rather than written literally."
-  type        = list(string)
-  default     = ["hub", "workload", "shared"]
 }
 
 variable "resolution_policy" {
@@ -92,10 +79,10 @@ variable "resolution_policy" {
     endpoint name whenever a linked zone answers NXDOMAIN. That is the right
     choice for a general estate and the wrong one here: it converts a missing
     or misnamed record from a loud DNS failure into a silent connection to the
-    public endpoint, which once Phase 4 disables public network access
-    surfaces as a 403 from an unexpected direction rather than as the DNS
-    fault it actually is. It would also make Phase 13's deliberate
-    break-a-DNS-record drill prove nothing.
+    public endpoint, which once the private endpoints phase disables public
+    network access surfaces as a 403 from an unexpected direction rather than
+    as the DNS fault it actually is. It would also make the drills phase's
+    deliberate break-a-DNS-record drill prove nothing.
 
     Confirmed present in azurerm 4.81.0 by reading the provider source at tag
     v4.81.0: Optional + Computed, validated against the SDK value list, and

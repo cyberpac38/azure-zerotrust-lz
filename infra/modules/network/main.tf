@@ -12,8 +12,8 @@
 #   Ungated : azurerm_firewall_policy
 #             A policy with zero or one firewall association is free, so there
 #             is no cost reason to remove it - and it is where every rule from
-#             Phase 4 onward lives. Gating it would delete the estate's rules
-#             every time the firewall came down.
+#             the private endpoints phase onward lives. Gating it would delete
+#             the estate's rules every time the firewall came down.
 #
 #   Ungated : azurerm_route_table, azurerm_subnet_route_table_association
 #             This is the important one. If the route tables disappeared with
@@ -78,10 +78,10 @@ resource "azurerm_subnet" "firewall" {
 ###############################################################################
 
 # DNS proxy is the reason this is Standard rather than Basic: it is what lets
-# the firewall answer privatelink queries on behalf of the spokes, which
-# Phase 3 depends on. Enabling it here, before any zone exists, means Phase 3
-# adds zones to a firewall that is already the resolver rather than changing
-# the resolver and the zones in the same step.
+# the firewall answer privatelink queries on behalf of the spokes, which the
+# private DNS phase depends on. Enabling it here, before any zone exists,
+# means that phase adds zones to a firewall that is already the resolver
+# rather than changing the resolver and the zones in the same step.
 resource "azurerm_firewall_policy" "main" {
   # checkov:skip=CKV_AZURE_220:IDPS requires the Premium SKU. This project runs Standard deliberately - Premium roughly triples the hourly rate and demonstrates nothing this landing zone claims. Revisit only if the tier changes.
   name                = "afwp-${var.prefix}"
@@ -161,12 +161,14 @@ resource "azurerm_subnet" "workload" {
   address_prefixes     = [cidrsubnet(each.value.address_space, 4, 0)]
 }
 
-# Private endpoint NICs land here from Phase 4 onward. This subnet gets NO
+# Private endpoint NICs land here from the private endpoints phase onward.
+# This subnet gets NO
 # route table: a 0.0.0.0/0 UDR on a private endpoint subnet interferes with
 # private endpoint traffic, and private endpoints do not egress to the
 # internet in the first place, so there is nothing to force through the
 # firewall. private_endpoint_network_policies is deliberately left at the
-# provider default and is Phase 4's concern, not this module's.
+# provider default and is the private endpoints phase's concern, not this
+# module's.
 resource "azurerm_subnet" "privatelink" {
   for_each = var.spokes
 
@@ -254,17 +256,17 @@ resource "azurerm_subnet_route_table_association" "workload" {
 ###############################################################################
 
 output "hub_resource_group_name" {
-  description = "Hub resource group name. Phase 3's DNS module takes this as a module reference rather than a literal name, which is what orders the resource group before any zone on a fresh build."
+  description = "Hub resource group name. The private DNS module takes this as a module reference rather than a literal name, which is what orders the resource group before any zone on a fresh build."
   value       = azurerm_resource_group.hub.name
 }
 
 output "hub_vnet_id" {
-  description = "Hub VNet resource ID. Phase 3 links private DNS zones to it."
+  description = "Hub VNet resource ID. The private DNS phase links zones to it."
   value       = azurerm_virtual_network.hub.id
 }
 
 output "spoke_vnet_ids" {
-  description = "Spoke VNet resource IDs by spoke key. Phase 3 links private DNS zones to each."
+  description = "Spoke VNet resource IDs by spoke key. The private DNS phase links zones to each."
   value       = { for k, v in azurerm_virtual_network.spoke : k => v.id }
 }
 
@@ -274,17 +276,18 @@ output "spoke_workload_subnet_ids" {
 }
 
 output "spoke_privatelink_subnet_ids" {
-  description = "Private endpoint subnet IDs by spoke key. Phase 4 places private endpoints here."
+  description = "Private endpoint subnet IDs by spoke key. The private endpoints phase places them here."
   value       = { for k, v in azurerm_subnet.privatelink : k => v.id }
 }
 
 output "firewall_policy_id" {
-  description = "Firewall policy ID. Exists whether or not a firewall does; Phase 4 attaches rule collection groups to it."
+  description = "Firewall policy ID. Exists whether or not a firewall does; the private endpoints phase attaches rule collection groups to it."
   value       = azurerm_firewall_policy.main.id
 }
 
-# null when firewall_enabled is false. Step 3.9 reads this, and Phase 3 uses it
-# as the DNS forwarder address. It changes on every recreate, so nothing should
+# null when firewall_enabled is false. Step 3.9 reads this, and the private
+# DNS phase uses it as the DNS forwarder address. It changes on every
+# recreate, so nothing should
 # hardcode a value read from it.
 output "firewall_private_ip" {
   description = "Private IP of the firewall, or null when firewall_enabled is false."
@@ -330,7 +333,7 @@ resource "azurerm_network_security_group" "workload" {
   # Explicit, auditable restatement of Azure's default DenyAllInBound, scoped
   # to Internet so VNet traffic (the firewall's forwarded packets) is
   # untouched. Priority 4000 leaves 1-3999 free for the application-specific
-  # allows that Phase 5 onward will need.
+  # allows a later phase may need.
   security_rule {
     name                       = "deny-internet-inbound"
     priority                   = 4000
@@ -357,10 +360,11 @@ resource "azurerm_network_security_group" "privatelink" {
   # private-endpoint subnets forget: a compromised endpoint NIC calling out is
   # exactly the exfiltration path private endpoints are meant to remove.
   #
-  # NOTE for Phase 4: NSG rules only apply to private endpoint traffic when
-  # the subnet has private_endpoint_network_policies enabled. This module
-  # leaves that at the provider default, so Phase 4 must set it when it places
-  # endpoints here - otherwise these rules exist and enforce nothing.
+  # NOTE for the private endpoints phase: NSG rules only apply to private
+  # endpoint traffic when the subnet has private_endpoint_network_policies
+  # enabled. This module leaves that at the provider default, so that phase
+  # must set it when it places endpoints here - otherwise these rules exist
+  # and enforce nothing.
   security_rule {
     name                       = "deny-internet-inbound"
     priority                   = 4000
@@ -401,6 +405,6 @@ resource "azurerm_subnet_network_security_group_association" "privatelink" {
 }
 
 output "workload_nsg_ids" {
-  description = "Workload NSG IDs by spoke key. Phase 5 adds application-specific allow rules to these."
+  description = "Workload NSG IDs by spoke key. A later phase adds application-specific allow rules to these."
   value       = { for k, v in azurerm_network_security_group.workload : k => v.id }
 }

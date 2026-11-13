@@ -22,9 +22,8 @@ module "network" {
 module "dns" {
   source = "./modules/dns"
 
-  prefix   = var.prefix
-  location = var.location
-  tags     = var.tags
+  prefix = var.prefix
+  tags   = var.tags
 
   # Module references, not literal names. This is the dependency edge that
   # makes Terraform create the hub resource group and all three VNets before
