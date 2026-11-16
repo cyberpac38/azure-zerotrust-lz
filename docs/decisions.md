@@ -41,7 +41,14 @@ policies.
 
 ## Where are the secrets?
 
-There are none, and that is a design property rather than a claim.
+The pipeline has none, and that is a design property rather than a claim.
+
+There is now exactly one secret in this estate, and the pipeline cannot read
+it. The private endpoints phase created a Key Vault holding a test secret
+reachable only from inside the network, so the question splits in two: CI
+holds no credential of its own, and the one value the estate does hold sits
+somewhere CI has no path to. The entry below on managing a vault the pipeline
+cannot reach covers that half.
 
 CI authenticates to Azure by OIDC federation: GitHub mints a short-lived
 signed token at run time and Entra exchanges it for an Azure token. Nothing
@@ -156,11 +163,12 @@ that the reviewed diff is byte-for-byte what landed.
 
 ## Why does the firewall only exist while you are working?
 
-Azure Firewall bills by the hour whether or not traffic passes it. Roughly
-$1.25/hour is a third-party figure for Central US in July 2026 — directional
-only, not quoted from Microsoft — but the order of magnitude is what drives
-the design: left running, it is most of a thousand dollars a month for an
-estate nobody is using.
+Azure Firewall bills by the hour whether or not traffic passes it.
+**$1.25/hour** in eastus, the `Standard Deployment` meter, read from
+Microsoft's own Retail Prices API on 2026-11-13. Left running that is $912.50
+a month for an estate nobody is using, plus $3.65 for its public IP. The
+figure this entry originally carried was a third-party estimate labelled as
+directional; it turned out to be exactly right, and it is now sourced.
 
 So it is absent by default. `up.sh` brings it up for a session, `down.sh`
 takes it down, and a nightly workflow tears down anything still running
@@ -503,6 +511,150 @@ the module's `private_dns_zones` map and a reviewed pull request.
 
 ---
 
+## Why was the Key Vault never made public, even for the minutes it took to seed it?
+
+The build runbook's draft deployed the vault with public access on, wrote a
+test secret from a laptop, then closed it in a second apply - deliberately, so
+that the deploy and the lockdown were not the same operation and could not
+lock you out mid-build. That sequence was dropped.
+
+Two reasons, and the first decided it. checkov hard-fails the open state on
+two checks: public network access enabled, and a firewall whose default action
+is not Deny. The pull request that opened the vault could only merge carrying
+two skip comments, and a commit saying this zero-trust vault was briefly open
+to the internet stays in a public history after the next commit removes them.
+Second, `docs/policy-layers.md` already recorded that a later Deny policy on
+`publicNetworkAccess` would make that window impossible anyway - building it
+now would mean unbuilding it later.
+
+So the vault is created closed - `public_network_access_enabled = false`,
+`default_action = "Deny"`, `bypass = "None"` from its first apply - and the
+secret is written from inside the network by `seed-and-verify-vault.sh`.
+
+**Alternative rejected:** the runbook's two-apply sequence. It is the right
+pattern for an estate where nothing inside the network can write the secret
+yet. Here something can.
+
+**Cost:** the demonstration loses its "before" half - there is no moment where
+the vault is open and a laptop can read it. What replaced it is stronger: the
+same vault refusing this laptop with `ForbiddenByConnection` and answering a
+VM inside the spoke, both against a vault that was never open.
+
+---
+
+## Why is the private endpoint permanent when the firewall is not?
+
+A private endpoint bills by the hour, which in this estate is normally an
+argument for destroying it between sessions. It is not destroyed.
+
+checkov `CKV2_AZURE_32` requires a Key Vault to have a private endpoint, and
+the plan the pipeline scans is the resting state. An endpoint absent at rest
+would fail that check on every future pull request, or force a permanent skip
+saying this vault has no private endpoint - in a repository called
+`azure-zerotrust-lz`. That exception is worth more than the money it saves.
+
+The money, measured from Microsoft's price feed rather than estimated:
+`Standard Private Endpoint` is $0.01/hour, so $7.30 a month. Azure Firewall's
+`Standard Deployment` is $1.25/hour. The firewall is 125 times the endpoint,
+which is why one comes down nightly and the other does not.
+
+**Alternative rejected:** gating the endpoint on a variable the way
+`firewall_enabled` gates the firewall, and extending `up.sh`, `down.sh` and
+the nightly teardown to cover it. Real work, to save $7.30 a month and buy a
+standing security exception.
+
+**Cost:** $7.30 a month, and with the six private DNS zones at $0.50 each this
+estate now has a $10.30 standing cost with nothing running. Against a $50
+budget alerting at $12.50, that leaves about two one-hour firewall sessions a
+month before the first alert fires.
+
+---
+
+## How does the pipeline manage a vault it cannot reach?
+
+It holds the control plane and nothing else.
+
+A Key Vault's firewall governs its data plane only, so creating, configuring
+and destroying the vault keeps working from outside the network while reading
+a secret does not. The pipeline runs on GitHub-hosted runners, outside the
+VNet, and that is where it stays.
+
+This was checked before it was relied on. The provider's read path at azurerm
+v4.81.0 makes one data-plane call, for certificate contacts, and ignores its
+failure when public network access is off - precisely so that a closed vault
+can still be managed. That was read from the provider's source at tag
+`v4.81.0` rather than from the website documentation, and then confirmed in
+practice: the plan and the apply both ran against a vault that was closed from
+its first moment.
+
+**Alternative rejected:** self-hosted runners inside the VNet. The correct
+answer for production and the wrong one here, for the same reason the state
+backend is not behind a private endpoint - always-on infrastructure in a
+project whose whole claim is that nothing runs between sessions. Also
+rejected: a time-boxed policy exemption, which solves a problem this estate no
+longer has.
+
+**Cost:** Terraform can never manage a secret in this vault. No
+`azurerm_key_vault_secret` belongs in the module, because that resource talks
+to the data plane and would fail from the pipeline the moment the vault is
+closed. Secrets are seeded from inside by `seed-and-verify-vault.sh`, which is
+a separation of duties rather than a workaround.
+
+---
+
+## Why does nobody hold data-plane access on the vault except one identity?
+
+One user-assigned managed identity holds Key Vault Secrets Officer, scoped to
+the vault. Not the pipeline, whose service principal holds Contributor at
+subscription scope. Not the human account, which is Owner.
+
+Owner and Contributor carry no right to read a secret when a vault uses Azure
+role assignments rather than its own access-policy list, which is what
+`rbac_authorization_enabled` selects. Under access policies anyone holding
+Contributor can add themselves to the list and read everything in it.
+
+Granting the human account a data-plane role was considered and rejected,
+because it would have made the step 5.3 check ambiguous - a refusal could then
+mean either the network or authorization. In the event the question answered
+itself: the refusal reads `ForbiddenByConnection` and names both the `bypass`
+and `PublicNetworkAccess` settings, so the network refused before
+authorization was ever consulted.
+
+**Alternative rejected:** a system-assigned identity on the seeding VM. It is
+created and destroyed with its VM, so the role assignment would have to be
+made by the same script and would be left pointing at a principal that no
+longer exists.
+
+**Cost:** reading that secret requires standing up a VM inside the spoke. That
+is the intended cost, not a side effect.
+
+---
+
+## Why did the private endpoint subnets carry rules that enforced nothing?
+
+Because Azure's default for a subnet is `privateEndpointNetworkPolicies:
+Disabled`, and Disabled means network security group rules are **not applied**
+to traffic bound for a private endpoint in that subnet. Measured on this
+estate before it was changed: Disabled on all five subnets.
+
+The network module had carried deny-internet rules on both `snet-privatelink`
+subnets since it was built, including the outbound half that most private
+endpoint subnets forget. They were decoration. The private endpoints phase set
+both subnets to `NetworkSecurityGroupEnabled`, an in-place update on each
+spoke, and confirmed it in Azure afterwards.
+
+`NetworkSecurityGroupEnabled` rather than `Enabled`: `Enabled` also applies
+route tables to private endpoint traffic, and these subnets deliberately have
+no route table.
+
+**Alternative rejected:** leaving it alone on the grounds that a private
+endpoint does not egress anyway. A rule that cannot fire is worse than no
+rule, because a reader believes it.
+
+**Cost:** nothing measurable. One argument on a subnet resource.
+
+---
+
 ## Why was the Kubernetes platform cut?
 
 Because this project is read before it is ever run, and the parts removed did
@@ -631,3 +783,16 @@ has not been decided, not that it has been forgotten.
   and its private IP is reassigned on every create. The proxy itself is already
   enabled on `afwp-ztlz`; what an absent DNS server does to resolution while
   the firewall is down has not been measured (runbook step 4.4)
+- Whether `Standard Capacity Unit`, the Azure Firewall meter that came into
+  effect on 2025-11-01 at $0.07/hour, ever bills on this estate. It has not
+  appeared in any billing to date, including a real firewall session. Settling
+  it needs a session with sustained traffic through the firewall
+- What `Fixed Private Endpoint T1` is. It appears in Microsoft's price feed at
+  $14.00/hour, region Global, in effect from 2026-10-01, and no documentation
+  describing it was found. `azurerm_private_endpoint` at v4.81.0 exposes no
+  tier argument, and this estate's endpoint bills on the ordinary
+  `Standard Private Endpoint` meter - but the first cost read after creating
+  any future endpoint checks for it
+- Why the firewall's public IP billed 108 minutes against the firewall's 52 on
+  2026-11-04, both in `rg-ztlz-hub`. Recorded with the query that settles it in
+  `docs/cost-sessions.md`

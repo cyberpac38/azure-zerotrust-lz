@@ -8,16 +8,16 @@ Resource prefix: `ztlz`. Naming: `<resource-type>-ztlz-<role>`. Single region.
 
 ## Status
 
-30 of 76 steps. Complete: the Terraform state backend, keyless CI, the cost
+34 of 76 steps. Complete: the Terraform state backend, keyless CI, the cost
 guards, the repository controls that make everything after this enforced
-rather than merely documented, the hub-and-spoke network, and the private DNS
-zones.
+rather than merely documented, the hub-and-spoke network, the private DNS
+zones, and private endpoints.
 
-The private endpoints phase is in progress. A Key Vault that has never been
-reachable from the internet, its private endpoint, and the DNS record that
-makes its own name resolve to a private address are applied and verified in
-Azure. The remaining steps seed a secret from inside the network and prove the
-control from both sides.
+The private endpoints phase is done and measured. A Key Vault that has never
+been reachable from the internet refuses a caller outside the network with
+`ForbiddenByConnection`, and answers one inside the spoke over its private
+endpoint in about 1.7 seconds — on a machine with no internet route at all.
+The policy repository is next.
 
 Two steps of the private DNS phase are open rather than done — pointing the
 spokes at the firewall's DNS proxy, and the NXDOMAIN alert. Both are recorded
