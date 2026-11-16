@@ -45,28 +45,30 @@ could repair it.
   does not need keys. An account that wants them is an exception needing
   sign-off.
 
-### The conflict this layer creates with the private endpoints phase
+### The conflict this layer created with the private endpoints phase, resolved
 
-Runbook steps 5.2 and 5.3 deploy Key Vault with `public_access_enabled = true`,
-seed a secret, then flip it off - specifically so the deploy and the lockdown
-are not in the same apply. A Deny on `publicNetworkAccess` at subscription
-scope makes step 5.2 impossible: the deploy is refused before the seeding can
-happen.
+The build runbook's draft deployed Key Vault with public access on, seeded a
+secret, then flipped it off. A Deny on `publicNetworkAccess` at subscription
+scope would have made that impossible: the deploy is refused before the
+seeding can happen.
 
-Three ways out, in order of preference:
+**That conflict no longer exists.** The private endpoints phase took the first
+of the three options this file used to list - the secret is written from
+inside the spoke, over the private endpoint, so the vault is never public and
+no seeding window is needed. It is created with
+`public_network_access_enabled = false` and `default_action = "Deny"` from its
+first apply, and `seed-and-verify-vault.sh` writes the secret from a throwaway
+VM in the shared spoke.
 
-1. **Seed through the private endpoint from the start.** Write the secret from
-   a host inside the spoke, so public access is never needed. Costs a jump
-   host; removes the exception entirely.
-2. **Scope the Deny to the workload spoke resource groups**, leaving the
-   shared and platform groups out, so the seeding window exists in exactly one
-   named place.
-3. **A policy exemption with an expiry date** on the vault's resource group for
-   the duration of the seeding. The expiry is the important half - an exemption
-   without one becomes permanent and nobody notices.
+The consequence for this layer: **the Deny definition can be written at
+subscription scope with no carve-out and no exemption.** The two other options
+once listed here - scoping the Deny to named resource groups, and a time-boxed
+exemption - are not needed and are not being held in reserve.
 
-Decide before the policy repository phase writes the Deny definition, because
-the choice changes the definition's scope.
+One thing this does constrain. Any future service in this estate that needs a
+secret seeded must be reachable from inside the network before the secret is
+written, because there is no longer a public window to fall back on. That is
+the intended shape, and `seed-and-verify-vault.sh` is the pattern for it.
 
 ## DeployIfNotExists - missing and safely creatable
 
