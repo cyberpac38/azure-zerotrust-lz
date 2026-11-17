@@ -1,0 +1,106 @@
+{
+  "properties": {
+    "displayName": "Deploy Key Vault audit logs to the platform workspace",
+    "policyType": "Custom",
+    "mode": "Indexed",
+    "description": "When a Key Vault is created or updated without a diagnostic setting of this name sending AuditEvent logs to the platform Log Analytics workspace, deploys one. Acts on create and update only: a vault that already existed is marked non-compliant and needs a remediation task.",
+    "metadata": {
+      "version": "1.0.0",
+      "category": "Monitoring",
+      "owner": "platform-team"
+    },
+    "parameters": {
+      "logAnalyticsWorkspaceId": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Log Analytics workspace resource ID",
+          "description": "Filled in by the remediation initiative from the platform module.",
+          "strongType": "omsWorkspace"
+        }
+      },
+      "diagnosticSettingName": {
+        "type": "String",
+        "defaultValue": "to-platform-law",
+        "metadata": {
+          "displayName": "Diagnostic setting name",
+          "description": "The one setting this policy checks for and deploys."
+        }
+      }
+    },
+    "policyRule": {
+      "if": {
+        "field": "type",
+        "equals": "Microsoft.KeyVault/vaults"
+      },
+      "then": {
+        "effect": "deployIfNotExists",
+        "details": {
+          "type": "Microsoft.Insights/diagnosticSettings",
+          "name": "[parameters('diagnosticSettingName')]",
+          "evaluationDelay": "PT10M",
+          "existenceCondition": {
+            "allOf": [
+              {
+                "field": "Microsoft.Insights/diagnosticSettings/workspaceId",
+                "equals": "[parameters('logAnalyticsWorkspaceId')]"
+              },
+              {
+                "count": {
+                  "field": "Microsoft.Insights/diagnosticSettings/logs[*]",
+                  "where": {
+                    "allOf": [
+                      {
+                        "field": "Microsoft.Insights/diagnosticSettings/logs[*].category",
+                        "equals": "AuditEvent"
+                      },
+                      {
+                        "field": "Microsoft.Insights/diagnosticSettings/logs[*].enabled",
+                        "equals": "true"
+                      }
+                    ]
+                  }
+                },
+                "greaterOrEquals": 1
+              }
+            ]
+          },
+          "roleDefinitionIds": [
+            "/providers/Microsoft.Authorization/roleDefinitions/92aaf0da-9dab-42b6-94a3-d43ce8d16293"
+          ],
+          "deployment": {
+            "properties": {
+              "mode": "incremental",
+              "parameters": {
+                "resourceName": { "value": "[field('name')]" },
+                "logAnalyticsWorkspaceId": { "value": "[parameters('logAnalyticsWorkspaceId')]" },
+                "diagnosticSettingName": { "value": "[parameters('diagnosticSettingName')]" }
+              },
+              "template": {
+                "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                "contentVersion": "1.0.0.0",
+                "parameters": {
+                  "resourceName": { "type": "string" },
+                  "logAnalyticsWorkspaceId": { "type": "string" },
+                  "diagnosticSettingName": { "type": "string" }
+                },
+                "resources": [
+                  {
+                    "type": "Microsoft.KeyVault/vaults/providers/diagnosticSettings",
+                    "apiVersion": "2021-05-01-preview",
+                    "name": "[concat(parameters('resourceName'), '/Microsoft.Insights/', parameters('diagnosticSettingName'))]",
+                    "properties": {
+                      "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
+                      "logs": [
+                        { "category": "AuditEvent", "enabled": true }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
