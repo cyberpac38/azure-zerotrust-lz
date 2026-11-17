@@ -1,0 +1,51 @@
+{
+  "properties": {
+    "displayName": "Deny PaaS resources with public network access enabled",
+    "policyType": "Custom",
+    "mode": "Indexed",
+    "description": "Refuses creation or update of supported PaaS resources whose publicNetworkAccess is not Disabled. Public access cannot be derived or safely auto-corrected, so it is denied rather than remediated. Covers Key Vault and Storage; Container Registry is intentionally absent because the registry was cut from this estate.",
+    "metadata": {
+      "version": "1.0.0",
+      "category": "Network",
+      "owner": "platform-team"
+    },
+    "parameters": {
+      "effect": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Effect",
+          "description": "Deny blocks the deployment. Audit records it only."
+        },
+        "allowedValues": ["Audit", "Deny", "Disabled"],
+        "defaultValue": "Deny"
+      }
+    },
+    "policyRule": {
+      "if": {
+        "anyOf": [
+          {
+            "allOf": [
+              { "field": "type", "equals": "Microsoft.KeyVault/vaults" },
+              {
+                "field": "Microsoft.KeyVault/vaults/publicNetworkAccess",
+                "notEquals": "Disabled"
+              }
+            ]
+          },
+          {
+            "allOf": [
+              { "field": "type", "equals": "Microsoft.Storage/storageAccounts" },
+              {
+                "field": "Microsoft.Storage/storageAccounts/publicNetworkAccess",
+                "notEquals": "Disabled"
+              }
+            ]
+          }
+        ]
+      },
+      "then": {
+        "effect": "[parameters('effect')]"
+      }
+    }
+  }
+}

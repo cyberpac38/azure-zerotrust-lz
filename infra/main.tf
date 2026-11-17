@@ -59,3 +59,17 @@ module "privatelink" {
   privatelink_subnet_id         = module.network.spoke_privatelink_subnet_ids["shared"]
   key_vault_private_dns_zone_id = module.dns.zone_ids["privatelink.vaultcore.azure.net"]
 }
+
+module "policy" {
+  source = "./modules/policy"
+
+  prefix         = var.prefix
+  enforce_policy = var.enforce_policy
+
+  # The state account's resource group pre-exists (created by the backend
+  # bootstrap, never by this config), so a literal name is correct here and
+  # races nothing. rg-RAG is an unrelated project that only shares this
+  # subscription and is carved out of the baseline.
+  state_resource_group_name     = "rg-ztlz-tfstate"
+  excluded_resource_group_names = ["rg-RAG"]
+}

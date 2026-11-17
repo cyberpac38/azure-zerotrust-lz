@@ -27,3 +27,9 @@ variable "firewall_enabled" {
   type        = bool
   default     = false
 }
+
+variable "enforce_policy" {
+  description = "Whether the zero-trust baseline assignment enforces. False deploys the policy and its compliance signal with enforcement suspended; true blocks non-compliant create and update. Set true in terraform.tfvars to enforce."
+  type        = bool
+  default     = false
+}
