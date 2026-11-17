@@ -60,10 +60,15 @@ no seeding window is needed. It is created with
 first apply, and `seed-and-verify-vault.sh` writes the secret from a throwaway
 VM in the shared spoke.
 
-The consequence for this layer: **the Deny definition can be written at
-subscription scope with no carve-out and no exemption.** The two other options
-once listed here - scoping the Deny to named resource groups, and a time-boxed
-exemption - are not needed and are not being held in reserve.
+The consequence for this layer: **the Deny is written at subscription scope,
+with one exemption — the Terraform state account.** The Key Vault seeding
+window the conflict was about is gone, so the vault needs no carve-out. The
+state account is a separate case: it runs with public network access on by
+design (see `docs/decisions.md`, "Your state backend is reachable from the
+internet"), so it is carved out by a resource-group policy exemption scoped to
+this one definition — one documented account, not a scope-down of the policy.
+The remaining option once listed here, scoping the whole Deny to named resource
+groups, is not needed and is not being held in reserve.
 
 One thing this does constrain. Any future service in this estate that needs a
 secret seeded must be reachable from inside the network before the secret is
@@ -128,21 +133,18 @@ A thing you want visible but not blocked is Audit.
 ## Claims in this file that are judgement, not measurement
 
 The layer assignments above are design decisions and are argued, not measured.
-These mechanism claims have NOT been verified on this subscription and must be
-before the policy repository phase builds on them:
 
-- which requirements above have usable built-in definitions rather than needing
-  custom JSON
-- whether `publicNetworkAccess` is exposed as a policy alias for every service
-  listed
+One mechanism claim the policy repository phase relied on has now been
+measured: `publicNetworkAccess` is exposed as a policy alias for both services
+the Deny covers. `Microsoft.KeyVault/vaults/publicNetworkAccess` and
+`Microsoft.Storage/storageAccounts/publicNetworkAccess` both resolve on this
+subscription, and the enforced Deny was observed refusing a public Storage
+account by evaluating exactly that alias. Container Registry was dropped with
+the rest of the registry, so its alias was not checked.
 
-The second and third are settled by:
-
-    az policy definition list \
-      --query "[?policyType=='BuiltIn' && contains(displayName,'public network access')].{name:name,display:displayName}" \
-      -o table
-
-    az provider show --namespace Microsoft.Storage \
-      --expand resourceTypes/aliases \
-      --query "resourceTypes[?resourceType=='storageAccounts'].aliases[?contains(name,'publicNetworkAccess')].name" \
-      -o tsv
+One claim stays open, recorded in `docs/decisions.md` under "Open questions":
+which requirements have usable built-in definitions rather than needing custom
+JSON. The public-network-access Deny was written as custom JSON without
+surveying the built-ins first — that bought a single parameterised definition
+covering two resource types, and revisiting it is a later question, not a
+blocker.

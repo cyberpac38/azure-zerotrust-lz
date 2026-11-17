@@ -117,6 +117,38 @@ rather than let someone find it.
 
 ---
 
+## How is the state account excluded from the public-network-access Deny?
+
+With a resource-group policy exemption, not by narrowing the policy.
+
+The policy repository phase deploys a Deny on `publicNetworkAccess` at
+subscription scope, covering Key Vault and Storage. The state account
+(`stztlztfstate968833`) runs with public network access on by design — the
+entry above explains why — so it matches that Deny. An
+`azurerm_resource_group_policy_exemption` on `rg-ztlz-tfstate`, category
+`Waiver`, scoped by `policy_definition_reference_ids` to the
+`deny-public-network-access` reference only, carves it out. The compliance
+signal then reads that account as `exempt` rather than `noncompliant`, while a
+public Storage account created anywhere else is still refused — measured in
+`rg-ztlz-workload`, the refusal carries `RequestDisallowedByPolicy` and
+`policyExemptionIds: []`. The waiver is one account, not a hole in the policy.
+
+**Alternative rejected:** scoping the exemption to the whole assignment rather
+than to the one reference id. That would exempt the state account from every
+policy the baseline grows to include, widening silently as the initiative
+grows. Also rejected: dropping Storage from the Deny so the account never
+matches, which leaves the estate with no Deny on Storage public access at all —
+a larger hole than the one account. And leaving the account non-compliant with
+no exemption, which puts a permanent red mark on the estate's own compliance
+number with no recorded reason.
+
+**Cost:** one exemption resource to maintain, and the obligation to say in the
+compliance story that this account is a deliberate, documented exception rather
+than a miss. It also corrected an earlier claim in `docs/policy-layers.md` that
+the Deny would need no exemption: it needs exactly one, for exactly this reason.
+
+---
+
 ## Why is Terraform pinned to one exact version everywhere?
 
 Because Terraform records the version that last wrote the state file, and an
