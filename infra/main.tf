@@ -10,6 +10,10 @@
 #             that make each zone authoritative inside this estate
 #   privatelink - the Key Vault, its private endpoint, and the identity that
 #             seeds it from inside the network
+#   platform - the platform resource group and the Log Analytics workspace
+#             shared by policy remediation and observability
+#   policy  - the Deny baseline, and the remediation policies with the
+#             identity they deploy as
 ###############################################################################
 
 module "network" {
@@ -60,11 +64,27 @@ module "privatelink" {
   key_vault_private_dns_zone_id = module.dns.zone_ids["privatelink.vaultcore.azure.net"]
 }
 
+module "platform" {
+  source = "./modules/platform"
+
+  prefix   = var.prefix
+  location = var.location
+  tags     = var.tags
+}
+
 module "policy" {
   source = "./modules/policy"
 
   prefix         = var.prefix
+  location       = var.location
+  tags           = var.tags
   enforce_policy = var.enforce_policy
+
+  # Module references, not literal names: the dependency edges that create the
+  # platform resource group and the workspace before the remediation identity
+  # and the initiative that points at the workspace.
+  platform_resource_group_name = module.platform.resource_group_name
+  log_analytics_workspace_id   = module.platform.log_analytics_workspace_id
 
   # The state account's resource group pre-exists (created by the backend
   # bootstrap, never by this config), so a literal name is correct here and

@@ -1,0 +1,88 @@
+{
+  "properties": {
+    "displayName": "DEMONSTRATION ONLY - Key Vault audit logs, loose existence check",
+    "policyType": "Custom",
+    "mode": "Indexed",
+    "description": "A deliberately broken copy of dine-diagnostic-settings, kept to show the trap. It has no name and no existenceCondition, so ANY diagnostic setting on a vault satisfies it: a vault whose only setting sends metrics, or sends logs somewhere else, reads compliant and gets no audit logs. Its effect defaults to AuditIfNotExists, so it reports and never writes; set it to DeployIfNotExists only to repeat the demonstration.",
+    "metadata": {
+      "version": "1.0.0",
+      "category": "Monitoring",
+      "owner": "platform-team"
+    },
+    "parameters": {
+      "effect": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Effect",
+          "description": "AuditIfNotExists reports only. DeployIfNotExists would deploy the setting below whenever a vault has no diagnostic setting at all."
+        },
+        "allowedValues": ["DeployIfNotExists", "AuditIfNotExists", "Disabled"],
+        "defaultValue": "AuditIfNotExists"
+      },
+      "logAnalyticsWorkspaceId": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Log Analytics workspace resource ID",
+          "description": "Filled in by the remediation initiative from the platform module.",
+          "strongType": "omsWorkspace"
+        }
+      },
+      "diagnosticSettingName": {
+        "type": "String",
+        "defaultValue": "loose-demo",
+        "metadata": {
+          "displayName": "Diagnostic setting name",
+          "description": "Different from the tight policy's, so anything this copy ever deploys is visible by name."
+        }
+      }
+    },
+    "policyRule": {
+      "if": {
+        "field": "type",
+        "equals": "Microsoft.KeyVault/vaults"
+      },
+      "then": {
+        "effect": "[parameters('effect')]",
+        "details": {
+          "type": "Microsoft.Insights/diagnosticSettings",
+          "evaluationDelay": "PT10M",
+          "roleDefinitionIds": [
+            "/providers/Microsoft.Authorization/roleDefinitions/92aaf0da-9dab-42b6-94a3-d43ce8d16293"
+          ],
+          "deployment": {
+            "properties": {
+              "mode": "incremental",
+              "parameters": {
+                "resourceName": { "value": "[field('name')]" },
+                "logAnalyticsWorkspaceId": { "value": "[parameters('logAnalyticsWorkspaceId')]" },
+                "diagnosticSettingName": { "value": "[parameters('diagnosticSettingName')]" }
+              },
+              "template": {
+                "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                "contentVersion": "1.0.0.0",
+                "parameters": {
+                  "resourceName": { "type": "string" },
+                  "logAnalyticsWorkspaceId": { "type": "string" },
+                  "diagnosticSettingName": { "type": "string" }
+                },
+                "resources": [
+                  {
+                    "type": "Microsoft.KeyVault/vaults/providers/diagnosticSettings",
+                    "apiVersion": "2021-05-01-preview",
+                    "name": "[concat(parameters('resourceName'), '/Microsoft.Insights/', parameters('diagnosticSettingName'))]",
+                    "properties": {
+                      "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
+                      "logs": [
+                        { "category": "AuditEvent", "enabled": true }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
