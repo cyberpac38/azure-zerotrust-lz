@@ -8,10 +8,10 @@ Resource prefix: `ztlz`. Naming: `<resource-type>-ztlz-<role>`. Single region.
 
 ## Status
 
-39 of 76 steps. Complete: the Terraform state backend, keyless CI, the cost
+43 of 76 steps. Complete: the Terraform state backend, keyless CI, the cost
 guards, the repository controls that make everything after this enforced
 rather than merely documented, the hub-and-spoke network, the private DNS
-zones, private endpoints, and the policy repository.
+zones, private endpoints, the policy repository, and DeployIfNotExists.
 
 The policy repository phase is done and measured. A subscription-scoped Deny
 refuses any Key Vault or Storage account created with public network access
@@ -21,7 +21,16 @@ design, is carved out by a documented exemption and reads as `exempt` rather
 than non-compliant. The prior private endpoints phase stays measured: a Key
 Vault that has never been reachable from the internet refuses a caller outside
 the network with `ForbiddenByConnection` and answers one inside the spoke in
-about 1.7 seconds. DeployIfNotExists and its remediation paths are next.
+about 1.7 seconds.
+
+The DeployIfNotExists phase is done and measured. A second assignment, with
+its own identity holding one role, gives every new Key Vault a diagnostic
+setting sending its audit logs to the platform Log Analytics workspace — a
+test vault got one 654 seconds after it was created, with no human involved.
+Beside it, a deliberately loose copy shows the trap: with only a metrics
+setting on the vault, it read compliant while the real policy read
+non-compliant. The remediation-task generator, which fixes resources that
+existed before a policy did, is next.
 
 Two steps of the private DNS phase are open rather than done — pointing the
 spokes at the firewall's DNS proxy, and the NXDOMAIN alert. Both are recorded
@@ -44,8 +53,9 @@ sessions — see **Cost**.
 
 ## Cost
 
-Four meters bill in this estate. Two are permanent, two exist only during a
-work session, and every rate below was read from Microsoft's own price feed
+Five meters can bill in this estate. Two are permanent, two exist only during
+a work session, and one — the Log Analytics workspace — bills only past the
+first 5 GB a month. Every rate below was read from Microsoft's own price feed
 rather than estimated.
 
 | Meter | Rate | When it runs |
@@ -54,9 +64,10 @@ rather than estimated.
 | Its public IP, `Standard IPv4 Static Public IP` | $0.005/hour | session only |
 | `Standard Private Endpoint` | $0.01/hour | permanent |
 | `Private Zone`, six of them | $0.50 each | permanent |
+| Log Analytics ingestion, past the first 5 GB a month | $2.30/GB | permanent workspace |
 
 That is **$10.30 a month with nothing running** — the private endpoint and the
-six private DNS zones. Azure Firewall costs roughly a hundred and twenty-five
+six private DNS zones — while the workspace stays inside its free 5 GB. Azure Firewall costs roughly a hundred and twenty-five
 times the endpoint's hourly rate, so it is the one that is absent between
 sessions: `up.sh` brings it online, `down.sh` takes it down, and a nightly
 workflow tears down anything still running whether or not anyone remembered.

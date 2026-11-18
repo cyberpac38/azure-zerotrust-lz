@@ -82,7 +82,7 @@ application behaviour, and it always runs after the resource already exists.
 
 - **Diagnostic settings to the Log Analytics workspace**, per resource type.
   The canonical case: a diagnostic setting cannot break the resource it is
-  attached to.
+  attached to. **Built for Key Vault** — see below.
 - **Private DNS zone group on a private endpoint.** An endpoint without one has
   no A record, so the name does not resolve inside the VNet and the service
   looks down to the application. Creating the zone group is purely additive.
@@ -94,6 +94,19 @@ application behaviour, and it always runs after the resource already exists.
   depends on a policy from this layer.
 - **Defender for Cloud plans on the subscription.**
 - **Subscription activity log export.**
+
+### Built: Key Vault audit logs, in their own assignment
+
+`policy/definitions/remediate/dine-diagnostic-settings.json` deploys a
+diagnostic setting named `to-platform-law`, sending `AuditEvent` to
+`log-ztlz-platform`, to any Key Vault created or updated without one. This
+layer is assigned separately from the Deny layer, as `ztlz-remediate` with
+the identity `id-ztlz-policy`, because giving the Deny's assignment an
+identity would have forced it to be replaced — `docs/decisions.md`, "Why do
+the remediation policies have their own initiative and assignment?".
+
+Beside it sits `dine-diagnostic-settings-loose.json`, a deliberately broken
+copy that reports only and shows the existence-condition trap.
 
 ## Modify - present but wrong, safely correctable
 
@@ -141,6 +154,15 @@ the Deny covers. `Microsoft.KeyVault/vaults/publicNetworkAccess` and
 subscription, and the enforced Deny was observed refusing a public Storage
 account by evaluating exactly that alias. Container Registry was dropped with
 the rest of the registry, so its alias was not checked.
+
+Three mechanism claims the DeployIfNotExists layer relies on were measured on
+18 November by `policy/tests/dine-remediates.sh`. It acts on create and
+update only: `kv-ztlz-786cae`, which predates the policy, was marked
+non-compliant and nothing was deployed to it. A new vault was given its
+setting 654 seconds after creation, by the policy's own deployment. And a
+loose existence condition is satisfied by any setting: with only a
+metrics-only decoy on the vault, the tight policy read non-compliant and the
+loose one compliant.
 
 One claim stays open, recorded in `docs/decisions.md` under "Open questions":
 which requirements have usable built-in definitions rather than needing custom

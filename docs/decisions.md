@@ -447,6 +447,123 @@ can never prevent anything.
 
 ---
 
+## Why do the remediation policies have their own initiative and assignment?
+
+Because adding them to the baseline would have destroyed and recreated the
+enforcing Deny.
+
+A DeployIfNotExists policy deploys as a managed identity, so its assignment
+needs one. On azurerm 4.81.0 an assignment that has an identity must also have
+a `location`, and changing `location` forces a new assignment — read from the
+provider source at that tag. `ztlz-baseline` has neither, so the obvious edit
+(add an identity block to it) plans as destroy-and-create of the assignment
+that refuses public Key Vaults and Storage, taking its compliance history and
+the state-account waiver with it.
+
+So remediation definitions live in `policy/definitions/remediate/`, which the
+baseline's `fileset(..., "*.json")` does not descend into, and load into a
+second initiative, `ztlz-remediate`, with its own assignment carrying the
+identity and `location = "eastus"` from its first apply. The pull request's
+plan was the measurement: 8 to add, 0 to change, 0 to destroy, nothing named
+`baseline` in it. The workspace the policies send logs to is passed from the
+new platform module through the initiative's `parameter_values`, so no
+resource ID is typed into a JSON file.
+
+**Alternative rejected:** one initiative holding every effect. Simpler to read,
+but the first DeployIfNotExists definition would have forced the Deny's
+assignment to be replaced, and every later identity change would put the Deny
+at risk again.
+
+**Cost:** two assignments and two compliance signals instead of one. Both
+follow the same `enforce_policy` switch, so there is still one place to turn
+the policy layer off.
+
+---
+
+## Why a user-assigned identity, holding only Log Analytics Contributor?
+
+**User-assigned** because it then exists, and holds its role, before the
+assignment that uses it: Terraform creates `id-ztlz-policy`, grants its role,
+and only then creates the assignment (`depends_on`). A system-assigned
+identity is created by the assignment itself, so its grant could only follow
+the assignment, leaving a window in which a vault created at that moment would
+be evaluated by an identity with no permissions.
+
+**One role** because that is what the job needs. The build guide's draft named
+"Contributor and Monitoring Contributor"; its two role IDs were measured with
+`az role definition list` and are actually Monitoring Contributor and Log
+Analytics Contributor. Log Analytics Contributor alone carries
+`Microsoft.Insights/diagnosticSettings/*` and `Microsoft.Resources/deployments/*`,
+and Microsoft's current built-in policy for exactly this job (version 1.1.0)
+grants that one role. The grant is read from the definitions' own
+`roleDefinitionIds` in Terraform, so it cannot drift from what the policies ask
+for: Azure does not update an identity's roles when a definition changes.
+
+Measured after the apply: exactly one role assignment for the identity, Log
+Analytics Contributor at subscription scope.
+
+**Alternative rejected:** Contributor, as the draft's text said — write access
+to everything in the subscription, for a policy that writes diagnostic
+settings. Also rejected: both of the draft's roles, which is what Microsoft's
+older built-in (3.0.0) granted.
+
+**Cost:** Log Analytics Contributor at subscription scope is still wider than
+this policy needs — Microsoft's definition of it also includes virtual machine
+extension writes and storage account `listKeys`. Whether Monitoring
+Contributor alone would do is listed under open questions.
+
+---
+
+## Why does the Key Vault policy check one setting by name?
+
+Because a loose existence check is the trap this phase exists to show.
+
+The policy looks for a diagnostic setting named `to-platform-law` that sends
+`AuditEvent` logs to the platform workspace, counting log entries with
+`logs[*]` — the array form Microsoft documents for per-element checks, rather
+than the draft's single-value `logs.enabled`. Anything else on the vault is
+ignored, and if that one setting is missing the policy deploys it.
+
+Its deliberately broken copy, `dine-diagnostic-settings-loose`, has no name and
+no existence condition, so any diagnostic setting at all satisfies it. Measured
+on 18 November by `policy/tests/dine-remediates.sh`: a new vault was given
+`to-platform-law` by the policy 654 seconds after creation; with that setting
+then deleted and only a metrics-only decoy left, the tight policy read
+`noncompliant` and the loose one `compliant` — a vault with no audit logs
+anywhere, called compliant.
+
+The loose copy's effect is a parameter defaulting to `AuditIfNotExists`, so it
+reports and never writes. Left assigned as a DeployIfNotExists, it would add
+its own setting to every new vault that had none; the lesson is the compliance
+verdict, which is the same either way. Its display name starts
+`DEMONSTRATION ONLY`.
+
+**Alternative rejected:** checking only "a setting sends AuditEvent to this
+workspace", with no name. It accepts an equivalent setting under any name, but
+it is the shape that slides toward the loose copy.
+
+**Cost:** a vault that already sends its audit logs to the workspace under a
+different setting name gets `to-platform-law` as well, and its audit events are
+ingested twice. Microsoft's older built-in pins the name the same way.
+
+---
+
+## How is the remediation layer undone?
+
+Revert the two pull requests that added it (#21, the resources; #22, the
+fixture) through a pull request of their own. The plan should read 8 to
+destroy — the platform resource group and workspace, the identity and its role
+assignment, the two definitions, the initiative and the assignment — and
+nothing else.
+
+Diagnostic settings the policy has already deployed onto vaults are not in
+Terraform state, so a revert leaves them in place. At the time of writing
+there are none: the fixture's vault was purged, and `kv-ztlz-786cae`, which
+predates the policy, has no diagnostic setting. What deleting the workspace
+does to its data has not been exercised.
+
+---
+
 ## Why is "fallback to internet" switched off on every private DNS zone link?
 
 Because the failure it prevents is less dangerous than the failure it creates
@@ -728,7 +845,9 @@ Azure rather than read off the pipeline: six zones, three links each.
   project. Subscription-scoped policy assignments grant roles to their own
   remediation identities, which requires it. With a management group and a
   separate identity per scope it would be narrower; that is the honest answer,
-  and narrowing happens when the project's resource groups exist.
+  and the project's resource groups and its policy identity now exist, so
+  the narrowing is unblocked. It is a ticket of its own rather than part of
+  the phase that created them.
 - **Dependabot.** Dependabot-triggered runs get a read-only token and no
   Actions secrets, and whether they can obtain `id-token: write` for OIDC is
   undocumented. Enabling it without solving that produces permanently
@@ -805,7 +924,6 @@ broken, and can this check see that".
 Answered as the phases that settle them land. An empty answer here means it
 has not been decided, not that it has been forgotten.
 
-- Why a user-assigned policy identity rather than system-assigned
 - Why enforcement mode rather than the Audit effect for staged rollout
 - Which policy requirements have usable built-in definitions rather than
   needing custom JSON
@@ -815,6 +933,15 @@ has not been decided, not that it has been forgotten.
   and its private IP is reassigned on every create. The proxy itself is already
   enabled on `afwp-ztlz`; what an absent DNS server does to resolution while
   the firewall is down has not been measured (runbook step 4.4)
+- Where the NXDOMAIN alert's data will come from (runbook step 4.5). The
+  workspace it needs now exists, `log-ztlz-platform`, but nothing sends the
+  firewall's logs to it: no diagnostic setting for the firewall exists in the
+  code, and the firewall itself exists only during sessions
+- Whether Monitoring Contributor alone would do for the Key Vault
+  remediation policy. It carries `Microsoft.Insights/DiagnosticSettings/*`
+  and `Microsoft.Resources/deployments/*` without Log Analytics
+  Contributor's VM extension and storage `listKeys` rights, but no Microsoft
+  built-in grants it alone for this job, and it has not been tested here
 - Whether `Standard Capacity Unit`, the Azure Firewall meter that came into
   effect on 2025-11-01 at $0.07/hour, ever bills on this estate. It has not
   appeared in any billing to date, including a real firewall session. Settling
