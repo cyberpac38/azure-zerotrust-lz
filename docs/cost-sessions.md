@@ -42,6 +42,12 @@ the feed is used instead.
 | `Standard Private Endpoint` | $0.01 | hour | **Global** |
 | `Standard Data Processed - Ingress` / `- Egress` | $0.01 | GB | Global |
 | Azure DNS `Private Zone` | $0.50 | zone | Global |
+| Log Analytics `Analytics Logs Data Ingestion`, first 5 GB | $0.00 | GB | eastus |
+| Log Analytics `Analytics Logs Data Ingestion`, from 5 GB | $2.30 | GB | eastus |
+| Log Analytics `Analytics Logs Data Retention` | $0.10 | GB/month | eastus |
+
+The three Log Analytics rows were read 2026-11-18, when the platform
+workspace was created; the tier boundary is the feed's `tierMinimumUnits`.
 
 The private endpoint meter is filed under region `Global`, not `eastus`. Every
 query filtered to `eastus` returns nothing for it, which costs an afternoon if
@@ -53,6 +59,7 @@ Reproduce any of them:
 https://prices.azure.com/api/retail/prices?$filter=serviceName eq 'Azure Firewall' and armRegionName eq 'eastus'
 https://prices.azure.com/api/retail/prices?$filter=productName eq 'Virtual Network Private Link' and armRegionName eq 'Global'
 https://prices.azure.com/api/retail/prices?$filter=serviceName eq 'Virtual Network' and armRegionName eq 'eastus'
+https://prices.azure.com/api/retail/prices?$filter=serviceName eq 'Log Analytics' and armRegionName eq 'eastus'
 ```
 
 ### Two meters that exist and have never billed here
@@ -100,6 +107,12 @@ possible at all.
 | `Standard Private Endpoint`, one endpoint, 730 hours | $7.30 |
 | `Private Zone`, six zones | $3.00 |
 | **Total** | **$10.30** |
+
+Since 18 November the estate also holds `log-ztlz-platform`, a Log Analytics
+workspace on the pay-per-GB tier. It bills per GB taken in, and the price feed
+lists the first 5 GB at $0.00. The only thing sending to it is Key Vault
+`AuditEvent` logs from the remediation policy. It is left out of the total
+above until a cost read shows what it actually bills.
 
 The private endpoint is permanent rather than session-only on purpose: checkov
 `CKV2_AZURE_32` requires a Key Vault to have one, and the plan CI scans is the
@@ -274,3 +287,6 @@ this estate's own measurement.
 - The daily breakdown that settles the public IP question above.
 - Whether `Standard Capacity Unit` ever bills, which needs a session with real
   traffic through the firewall.
+- The first cost read since the workspace was created: its Log Analytics
+  lines, whether retention bills inside the 30 days kept, and the test
+  vault's line from `policy/tests/dine-remediates.sh`.
